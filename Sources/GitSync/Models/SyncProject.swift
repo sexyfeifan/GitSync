@@ -19,6 +19,8 @@ struct SyncProject: Codable, Identifiable, Equatable {
         case lastSyncAt
         case lastSyncMessage
         case branch
+        case needsInitialBackup
+        case initialBackupDone
     }
 
     /// 唯一标识符
@@ -43,6 +45,10 @@ struct SyncProject: Codable, Identifiable, Equatable {
     var lastSyncMessage: String
     /// 当前分支名称
     var branch: String
+    /// 是否需要首次同步前备份（导入已有本地仓库时设为 true）
+    var needsInitialBackup: Bool
+    /// 首次备份是否已完成
+    var initialBackupDone: Bool
 
     // MARK: - 静态缓存的格式化器
 
@@ -66,7 +72,9 @@ struct SyncProject: Codable, Identifiable, Equatable {
         syncStatus: SyncStatus = .notSynced,
         lastSyncAt: Date? = nil,
         lastSyncMessage: String = "",
-        branch: String = "main"
+        branch: String = "main",
+        needsInitialBackup: Bool = false,
+        initialBackupDone: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -79,6 +87,8 @@ struct SyncProject: Codable, Identifiable, Equatable {
         self.lastSyncAt = lastSyncAt
         self.lastSyncMessage = lastSyncMessage
         self.branch = branch
+        self.needsInitialBackup = needsInitialBackup
+        self.initialBackupDone = initialBackupDone
     }
 
     /// 自定义解码，支持向后兼容（新字段缺失时使用默认值）
@@ -96,6 +106,8 @@ struct SyncProject: Codable, Identifiable, Equatable {
         lastSyncAt = try container.decodeIfPresent(Date.self, forKey: .lastSyncAt)
         lastSyncMessage = try container.decodeIfPresent(String.self, forKey: .lastSyncMessage) ?? ""
         branch = try container.decodeIfPresent(String.self, forKey: .branch) ?? "main"
+        needsInitialBackup = try container.decodeIfPresent(Bool.self, forKey: .needsInitialBackup) ?? false
+        initialBackupDone = try container.decodeIfPresent(Bool.self, forKey: .initialBackupDone) ?? false
     }
 
     // MARK: - 便捷属性

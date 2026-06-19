@@ -13,13 +13,15 @@ enum SyncEngineFactory {
 
     /// 获取或创建共享的同步引擎实例
     /// 首次调用时创建实例，后续调用返回缓存的实例
-    /// - Parameter historyStore: 同步历史存储（仅首次调用时使用）
+    /// - Parameters:
+    ///   - historyStore: 同步历史存储
+    ///   - projectStore: 项目存储
     /// - Returns: 共享的 SyncEngine 实例
-    static func shared(historyStore: SyncHistoryStore) -> SyncEngine {
+    static func shared(historyStore: SyncHistoryStore, projectStore: ProjectStore) -> SyncEngine {
         if let existing = _shared {
             return existing
         }
-        let engine = SyncEngine(gitService: GitService.shared, historyStore: historyStore)
+        let engine = SyncEngine(gitService: GitService.shared, historyStore: historyStore, projectStore: projectStore)
         _shared = engine
         return engine
     }

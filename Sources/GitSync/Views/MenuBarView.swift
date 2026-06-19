@@ -153,6 +153,13 @@ struct MenuBarView: View {
                 }
                 .keyboardShortcut("q", modifiers: .command)
                 .accessibilityLabel(String(localized: "退出 GitSync"))
+
+                Button(String(localized: "强制退出")) {
+                    Darwin.exit(0)
+                }
+                .keyboardShortcut("q", modifiers: [.command, .shift])
+                .accessibilityLabel(String(localized: "强制退出 GitSync"))
+                .help(String(localized: "立即终止进程（忽略未保存数据）"))
             }
             .padding(8)
         }
@@ -220,7 +227,7 @@ struct MenuBarView: View {
         currentSyncingProject = nil
 
         // 使用共享 SyncEngine 实例，避免每次批量同步都创建新实例
-        let syncEngine = SyncEngineFactory.shared(historyStore: historyStore)
+        let syncEngine = SyncEngineFactory.shared(historyStore: historyStore, projectStore: projectStore)
         let handler = SyncResultHandler(
             syncEngine: syncEngine,
             projectStore: projectStore

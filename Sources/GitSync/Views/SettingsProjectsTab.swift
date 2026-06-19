@@ -176,36 +176,46 @@ struct SettingsProjectsTab: View {
         if FileManager.default.fileExists(atPath: localPath) {
             // 本地目录已存在
             if gitService.isGitRepository(at: localURL) {
-                // 是 Git 仓库，直接导入
+                // 是 Git 仓库，先备份再导入
+                let backupResult = await BackupService.shared.createBackup(
+                    sourceURL: localURL,
+                    projectName: parsed.name
+                )
+                let needsBackupFlag: Bool
+                switch backupResult {
+                case .success:
+                    needsBackupFlag = false // 备份成功，无需在同步时再备份
+                case .failure:
+                    needsBackupFlag = true // 备份失败，标记首次同步前需备份
+                }
+
                 let existingRemote = await gitService.remoteURL(at: localURL)
                 if let existingRemote = existingRemote,
                    GitHubService.parseRepoURL(existingRemote) != nil {
-                    // 远程 URL 可解析，直接添加
                     let project = SyncProject(
                         name: parsed.name,
                         remoteURL: existingRemote,
                         localPath: localPath,
-                        owner: parsed.owner
+                        owner: parsed.owner,
+                        needsInitialBackup: needsBackupFlag
                     )
                     projectStore.addProject(project)
                     newProjectURL = ""
                     showingAddProject = false
                 } else {
-                    // 无有效远程，设置用户提供的 URL 作为远程
-                    addProjectError = String(localized: "本地仓库无有效远程地址，正在设置...")
                     _ = await gitService.setRemoteURL(at: localURL, url: newProjectURL)
                     let project = SyncProject(
                         name: parsed.name,
                         remoteURL: newProjectURL,
                         localPath: localPath,
-                        owner: parsed.owner
+                        owner: parsed.owner,
+                        needsInitialBackup: needsBackupFlag
                     )
                     projectStore.addProject(project)
                     newProjectURL = ""
                     showingAddProject = false
                 }
             } else {
-                // 目录存在但不是 Git 仓库
                 addProjectError = String(localized: "本地目录已存在但不是 Git 仓库：\(localPath)")
                 addProjectTechnicalError = String(localized: "请删除该目录或选择其他同步目录后重试")
             }

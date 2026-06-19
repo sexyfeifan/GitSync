@@ -10,18 +10,22 @@ final class SyncEngine {
     private let gitService: GitServiceProtocol
     /// 同步历史存储
     private let historyStore: SyncHistoryStore
+    /// 项目存储（用于更新备份状态）
+    let projectStore: ProjectStore
 
     /// 初始化同步引擎
     /// - Parameters:
     ///   - gitService: Git 服务实例，默认使用共享实例
     ///   - historyStore: 历史存储实例（必须显式注入，不提供默认值）
-    init(gitService: GitServiceProtocol = GitService.shared, historyStore: SyncHistoryStore) {
+    ///   - projectStore: 项目存储实例
+    init(gitService: GitServiceProtocol = GitService.shared, historyStore: SyncHistoryStore, projectStore: ProjectStore) {
         self.gitService = gitService
         self.historyStore = historyStore
+        self.projectStore = projectStore
     }
 
     /// 同步指定项目
-    /// 完整流程：fetch → 检测远端变更 → 检测本地变更 → 决策同步策略 → 执行同步
+    /// 完整流程：首次备份 → fetch → 检测远端变更 → 检测本地变更 → 决策同步策略 → 执行同步
     /// 边界情况处理：目录不存在、不是 git 仓库、网络不可达等
     /// - Parameter project: 要同步的项目（使用 Models/SyncProject.swift 中定义的类型）
     /// - Returns: 同步结果
@@ -46,6 +50,26 @@ final class SyncEngine {
                       message: msg, startTime: startTime,
                       fromCommit: nil)
             return .error(message: msg)
+        }
+
+        // 首次同步安全检查：如果项目标记需要备份但尚未完成，先备份
+        if project.needsInitialBackup && !project.initialBackupDone {
+            let backupResult = await BackupService.shared.createBackup(
+                sourceURL: localPath,
+                projectName: project.name
+            )
+            switch backupResult {
+            case .success(let backupURL):
+                await MainActor.run {
+                    projectStore.markBackupDone(projectID: project.id)
+                }
+                Log.sync.info("首次同步前自动备份成功: \(backupURL.path)")
+            case .failure(let error):
+                let msg = String(localized: "首次同步前备份失败，同步已中止: \(error.localizedDescription)")
+                await recordSync(project: project, action: .sync, result: .failure,
+                          message: msg, startTime: startTime, fromCommit: nil)
+                return .error(message: msg)
+            }
         }
 
         // 记录当前 commit hash（用于历史记录）

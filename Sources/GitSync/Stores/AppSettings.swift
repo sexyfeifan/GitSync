@@ -24,6 +24,10 @@ final class AppSettings: ObservableObject {
     @AppStorage(AppConstants.defaultSyncPathKey)
     var defaultSyncPath: String = NSHomeDirectory() + "/GitHub"
 
+    /// 备份目录（导入已有本地仓库时自动备份原始状态）
+    @AppStorage(AppConstants.backupPathKey)
+    var backupPath: String = NSHomeDirectory() + "/GitSync-Backups"
+
     /// GitHub Personal Access Token
     @AppStorage(AppConstants.githubTokenKey)
     var githubToken: String = ""

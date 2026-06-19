@@ -36,6 +36,26 @@ struct SettingsGeneralTab: View {
                     .foregroundColor(.secondary)
             }
 
+            // 备份目录
+            Section(String(localized: "备份目录")) {
+                HStack {
+                    TextField(String(localized: "备份路径"), text: $settings.backupPath)
+                        .textFieldStyle(.roundedBorder)
+                    Button(String(localized: "选择")) {
+                        Task {
+                            if let path = await pickDirectoryAsync() {
+                                settings.backupPath = path
+                            }
+                        }
+                    }
+                    .accessibilityLabel(String(localized: "选择备份目录"))
+                    .accessibilityHint(String(localized: "打开文件夹选择器"))
+                }
+                Text(String(localized: "导入已有本地仓库时自动备份原始状态到此目录"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             // 自动同步
             Section(String(localized: "自动同步")) {
                 Toggle(String(localized: "启用自动同步"), isOn: $settings.autoSyncEnabled)

@@ -207,6 +207,15 @@ class ProjectStore: ObservableObject {
         if status == .synced {
             projects[index].lastSyncAt = Date()
         }
+    }
+
+    /// 标记项目的首次备份已完成
+    func markBackupDone(projectID: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else {
+            return
+        }
+        projects[index].initialBackupDone = true
+        projects[index].needsInitialBackup = false
         saveProjects()
     }
 

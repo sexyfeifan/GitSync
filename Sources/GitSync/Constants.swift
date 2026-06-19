@@ -34,6 +34,8 @@ enum AppConstants {
     static let autoSyncEnabledKey = "autoSyncEnabled"
     /// @AppStorage 键：默认同步目录
     static let defaultSyncPathKey = "defaultSyncPath"
+    /// @AppStorage 键：备份目录
+    static let backupPathKey = "backupPath"
     /// @AppStorage 键：GitHub Token
     static let githubTokenKey = "githubToken"
     /// UserDefaults 键：自动同步是否暂停

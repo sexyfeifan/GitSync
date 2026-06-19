@@ -104,7 +104,7 @@ struct ProjectRowView: View {
     private func syncSingleProject(_ project: SyncProject) async {
         guard !isSyncing else { return } // 防止重复点击
         isSyncing = true
-        let syncEngine = SyncEngineFactory.shared(historyStore: historyStore)
+        let syncEngine = SyncEngineFactory.shared(historyStore: historyStore, projectStore: projectStore)
         let handler = SyncResultHandler(
             syncEngine: syncEngine,
             projectStore: projectStore

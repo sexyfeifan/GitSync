@@ -92,7 +92,7 @@ class AutoSyncService: ObservableObject {
         self.networkMonitor = networkMonitor
 
         // 使用共享 SyncEngine 实例，避免重复创建
-        let syncEngine = SyncEngineFactory.shared(historyStore: historyStore)
+        let syncEngine = SyncEngineFactory.shared(historyStore: historyStore, projectStore: projectStore)
         self.resultHandler = SyncResultHandler(
             syncEngine: syncEngine,
             projectStore: projectStore,
