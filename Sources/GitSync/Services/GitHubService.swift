@@ -19,6 +19,18 @@ struct GitHubRepo: Codable {
     let isFork: Bool
     /// 如果是 fork，指向父仓库信息
     let parent: GitHubParent?
+    /// 仓库简介
+    let description: String?
+    /// 主要编程语言
+    let language: String?
+    /// Star 数量
+    let stargazersCount: Int?
+    /// Fork 数量
+    let forksCount: Int?
+    /// 开源许可证
+    let license: GitHubLicense?
+    /// 最后推送时间
+    let pushedAt: String?
 
     /// JSON 解码键映射
     enum CodingKeys: String, CodingKey {
@@ -29,6 +41,12 @@ struct GitHubRepo: Codable {
         case defaultBranch = "default_branch"
         case isFork = "fork"
         case parent
+        case description
+        case language
+        case stargazersCount = "stargazers_count"
+        case forksCount = "forks_count"
+        case license
+        case pushedAt = "pushed_at"
     }
 }
 
@@ -51,6 +69,19 @@ struct GitHubParent: Codable {
         case name
         case fullName = "full_name"
         case owner
+    }
+}
+
+/// GitHub 许可证信息
+struct GitHubLicense: Codable {
+    let key: String
+    let name: String
+    let spdxID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case name
+        case spdxID = "spdx_id"
     }
 }
 
@@ -158,6 +189,25 @@ final class GitHubService {
     func fetchRepo(owner: String, name: String) async -> Result<GitHubRepo, GitHubServiceError> {
         let url = "\(baseURL)/repos/\(owner)/\(name)"
         return await performRequest(url: url, method: "GET")
+    }
+
+    /// 获取仓库 README 内容（Base64 解码后的纯文本）
+    func fetchREADME(owner: String, name: String) async -> String? {
+        let url = "\(baseURL)/repos/\(owner)/\(name)/readme"
+        struct ReadmeResponse: Codable {
+            let content: String
+            let encoding: String
+        }
+        let result: Result<ReadmeResponse, GitHubServiceError> = await performRequest(url: url, method: "GET")
+        switch result {
+        case .success(let resp):
+            let cleaned = resp.content.replacingOccurrences(of: "\n", with: "")
+            guard let data = Data(base64Encoded: cleaned),
+                  let text = String(data: data, encoding: .utf8) else { return nil }
+            return text
+        case .failure:
+            return nil
+        }
     }
 
     /// Fork 一个仓库到当前用户账户

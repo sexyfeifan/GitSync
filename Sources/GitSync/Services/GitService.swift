@@ -203,6 +203,77 @@ final class GitService: Sendable {
         return FileManager.default.fileExists(atPath: gitDir.path)
     }
 
+    /// 获取本地仓库详细信息（commit hash、commit 消息、作者、日期、标签）
+    struct LocalRepoInfo {
+        let branch: String
+        let commitHash: String
+        let commitMessage: String
+        let author: String
+        let commitDate: String
+        let tags: [String]
+        let remoteURL: String?
+        let isClean: Bool
+    }
+
+    /// 读取本地仓库的详细信息
+    func localRepoInfo(at path: URL) async -> LocalRepoInfo? {
+        let branch = await currentBranch(at: path) ?? "unknown"
+        let hash = await commitHash(at: path) ?? "—"
+        let remote = await remoteURL(at: path)
+
+        // commit 消息
+        let msgResult = await executeGit(args: ["log", "-1", "--pretty=%s"], in: path)
+        let message: String
+        switch msgResult {
+        case .success(let out): message = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .failure: message = ""
+        }
+
+        // 作者
+        let authorResult = await executeGit(args: ["log", "-1", "--pretty=%an"], in: path)
+        let author: String
+        switch authorResult {
+        case .success(let out): author = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .failure: author = ""
+        }
+
+        // 日期
+        let dateResult = await executeGit(args: ["log", "-1", "--pretty=%ai"], in: path)
+        let date: String
+        switch dateResult {
+        case .success(let out): date = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .failure: date = ""
+        }
+
+        // 标签（当前 commit 关联的）
+        let tagResult = await executeGit(args: ["tag", "--points-at", "HEAD"], in: path)
+        let tags: [String]
+        switch tagResult {
+        case .success(let out):
+            tags = out.split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        case .failure:
+            tags = []
+        }
+
+        // 工作区是否干净
+        let statusClean: Bool
+        switch await status(at: path) {
+        case .success(let s): statusClean = s.isClean
+        case .failure: statusClean = true
+        }
+
+        return LocalRepoInfo(
+            branch: branch,
+            commitHash: String(hash.prefix(7)),
+            commitMessage: message,
+            author: author,
+            commitDate: date,
+            tags: tags,
+            remoteURL: remote,
+            isClean: statusClean
+        )
+    }
+
     /// 设置或更新 origin 远程地址
     /// - Parameters:
     ///   - at: 本地仓库路径

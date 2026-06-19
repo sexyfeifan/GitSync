@@ -4,8 +4,29 @@
 import SwiftUI
 import ServiceManagement
 
+// MARK: - App Delegate（处理 Dock 点击等 AppKit 事件）
+
+/// AppKit 代理，处理 Dock 图标点击 → 打开设置窗口
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            sender.activate(ignoringOtherApps: true)
+            // 尝试查找并显示已有窗口
+            for window in sender.windows where window.canBecomeMain {
+                window.makeKeyAndOrderFront(nil)
+                return true
+            }
+        }
+        return true
+    }
+}
+
+// MARK: - App 入口
+
 @main
 struct GitSyncApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     @StateObject private var projectStore = ProjectStore()
     @StateObject private var historyStore = SyncHistoryStore()
     @StateObject private var networkMonitor = NetworkMonitor()
@@ -14,14 +35,7 @@ struct GitSyncApp: App {
 
     @State private var autoSyncService: AutoSyncService?
     @Environment(\.scenePhase) private var scenePhase
-
-    /// 应用启动时初始化 Dock 图标状态
-    init() {
-        let showDock = UserDefaults.standard.bool(forKey: AppConstants.showDockIconKey)
-        if !showDock {
-            NSApp.setActivationPolicy(.accessory)
-        }
-    }
+    @State private var hasAppliedDockPolicy = false
 
     var body: some Scene {
         // 菜单栏常驻图标
@@ -38,16 +52,19 @@ struct GitSyncApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        // 主窗口（Dock 点击打开此窗口，默认显示设置/项目页）
+        // 主窗口（Dock 点击或菜单栏「设置」按钮打开）
         WindowGroup(id: "settings") {
             SettingsView()
                 .environmentObject(projectStore)
                 .environmentObject(historyStore)
+                .frame(minWidth: 600, minHeight: 480)
                 .onAppear {
+                    applyDockPolicy()
                     setupAutoSyncService()
                 }
         }
         .defaultSize(width: 620, height: 520)
+
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .inactive || newPhase == .background {
                 projectStore.flush()
@@ -59,6 +76,16 @@ struct GitSyncApp: App {
         }
         .onChange(of: settings.launchAtLogin) { enabled in
             toggleLaunchAtLogin(enabled)
+        }
+    }
+
+    // MARK: - Dock 图标策略
+
+    private func applyDockPolicy() {
+        guard !hasAppliedDockPolicy else { return }
+        hasAppliedDockPolicy = true
+        if !settings.showDockIcon {
+            NSApp.setActivationPolicy(.accessory)
         }
     }
 
