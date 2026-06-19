@@ -13,7 +13,7 @@ class NetworkMonitor: ObservableObject {
     @Published private(set) var isConnected: Bool = true
 
     /// 当前网络连接类型描述
-    @Published private(set) var connectionType: String = "未知"
+    @Published private(set) var connectionType: String = String(localized: "未知")
 
     /// 网络是否为受限模式（如蜂窝数据需付费）
     @Published private(set) var isExpensive: Bool = false
@@ -45,8 +45,8 @@ class NetworkMonitor: ObservableObject {
             let isExpensive = path.isExpensive
             let connectionType = Self.detectConnectionType(path: path)
 
-            // 在主线程更新状态
-            DispatchQueue.main.async {
+            // 使用 Task 确保在 MainActor 上更新状态
+            Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 let wasConnected = self.isConnected
                 self.isConnected = isConnected
@@ -69,13 +69,13 @@ class NetworkMonitor: ObservableObject {
         if path.usesInterfaceType(.wifi) {
             return "Wi-Fi"
         } else if path.usesInterfaceType(.cellular) {
-            return "蜂窝网络"
+            return String(localized: "蜂窝网络")
         } else if path.usesInterfaceType(.wiredEthernet) {
-            return "有线网络"
+            return String(localized: "有线网络")
         } else if path.usesInterfaceType(.loopback) {
-            return "本地回环"
+            return String(localized: "本地回环")
         } else {
-            return "其他网络"
+            return String(localized: "其他网络")
         }
     }
 
@@ -93,9 +93,9 @@ class NetworkMonitor: ObservableObject {
     /// 网络状态的中文描述
     var statusDescription: String {
         if !isConnected {
-            return "无网络连接"
+            return String(localized: "无网络连接")
         } else if isExpensive {
-            return "受限网络（\(connectionType)）"
+            return String(localized: "受限网络（\(connectionType)）")
         } else {
             return connectionType
         }

@@ -7,14 +7,15 @@ import SwiftUI
 /// 项目数据存储管理器
 @MainActor
 class ProjectStore: ObservableObject {
+    /// 防抖 Task，避免频繁写磁盘
+    private var debounceTask: Task<Void, Never>?
+
+
     /// 项目列表
     @Published var projects: [SyncProject] = []
 
     /// 存储文件路径
     private let storageURL: URL
-
-    /// 同步引擎（用于实际同步操作）
-    private let syncEngine: SyncEngine
 
     /// 初始化存储管理器
     init() {
@@ -26,7 +27,6 @@ class ProjectStore: ObservableObject {
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
 
         self.storageURL = appDir.appendingPathComponent("projects.json")
-        self.syncEngine = SyncEngine()
 
         // 加载已有数据
         loadProjects()
@@ -47,13 +47,27 @@ class ProjectStore: ObservableObject {
             decoder.dateDecodingStrategy = .iso8601
             projects = try decoder.decode([SyncProject].self, from: data)
         } catch {
-            print("加载项目数据失败: \(error.localizedDescription)")
+            print("[ProjectStore] 加载项目数据失败: \(error.localizedDescription)")
             projects = []
         }
     }
 
-    /// 保存项目列表到磁盘
+    /// 保存项目列表到磁盘（防抖：延迟 0.5 秒，合并多次快速调用）
     private func saveProjects() {
+        // 取消之前的待写入操作
+        debounceTask?.cancel()
+
+        // 创建新的防抖任务
+        debounceTask = Task { [weak self] in
+            // 延迟 0.5 秒，期间如有新调用会被取消
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            self?.writeProjectsToDisk()
+        }
+    }
+
+    /// 实际执行磁盘写入（在 MainActor 上执行）
+    private func writeProjectsToDisk() {
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -61,7 +75,7 @@ class ProjectStore: ObservableObject {
             let data = try encoder.encode(projects)
             try data.write(to: storageURL, options: .atomic)
         } catch {
-            print("保存项目数据失败: \(error.localizedDescription)")
+            print("[ProjectStore] 保存项目数据失败: \(error.localizedDescription)")
         }
     }
 
@@ -163,29 +177,6 @@ class ProjectStore: ObservableObject {
 
     // MARK: - 同步操作
 
-    /// 同步单个项目（使用 SyncEngine 执行实际同步）
-    func syncProject(_ project: SyncProject) async {
-        // 标记为同步中
-        updateSyncStatus(for: project.id, status: .syncing, message: "同步中...")
-
-        let result = await syncEngine.syncProject(project)
-
-        switch result {
-        case .success(let message):
-            updateSyncStatus(for: project.id, status: .synced, message: message)
-        case .upToDate:
-            updateSyncStatus(for: project.id, status: .synced, message: "已是最新")
-        case .conflict(let details):
-            updateSyncStatus(for: project.id, status: .conflict, message: "冲突：\(details)")
-        case .error(let message):
-            updateSyncStatus(for: project.id, status: .error, message: message)
-        }
-    }
-
-    /// 同步所有项目
-    func syncAll() async {
-        for project in projects {
-            await syncProject(project)
-        }
-    }
+    // 注意：同步逻辑统一由 AutoSyncService 管理
+    // ProjectStore 仅负责数据持久化和状态更新
 }

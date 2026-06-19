@@ -70,7 +70,7 @@ struct SyncProject: Codable, Identifiable, Equatable {
     /// 最后同步时间的格式化显示
     var lastSyncAtFormatted: String {
         guard let date = lastSyncAt else {
-            return "从未同步"
+            return String(localized: "从未同步")
         }
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = Locale(identifier: "zh_CN")

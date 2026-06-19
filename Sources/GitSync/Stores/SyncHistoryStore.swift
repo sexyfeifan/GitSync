@@ -3,6 +3,7 @@
 
 import Foundation
 import SwiftUI
+import Combine
 
 /// 同步历史记录存储管理器
 @MainActor
@@ -16,6 +17,12 @@ class SyncHistoryStore: ObservableObject {
     /// 历史记录保留的最大数量
     private let maxEntries = 1000
 
+    /// debounce 写入的 Timer，避免频繁磁盘写入
+    private var debounceTimer: Timer?
+
+    /// debounce 延迟（秒），批量操作时合并写入
+    private let debounceInterval: TimeInterval = 0.5
+
     /// 初始化存储管理器
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -28,6 +35,22 @@ class SyncHistoryStore: ObservableObject {
 
         // 加载已有数据
         loadEntries()
+    }
+
+    deinit {
+        // 退出时确保数据写入磁盘
+        debounceTimer?.invalidate()
+        debounceTimer = nil
+        // deinit 中不能调用 @MainActor 隔离的方法，直接序列化写入
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(entries)
+            try data.write(to: storageURL, options: .atomic)
+        } catch {
+            print("[SyncHistoryStore] deinit 保存失败: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - 持久化操作
@@ -45,12 +68,30 @@ class SyncHistoryStore: ObservableObject {
             decoder.dateDecodingStrategy = .iso8601
             entries = try decoder.decode([SyncHistoryEntry].self, from: data)
         } catch {
-            print("加载同步历史失败: \(error.localizedDescription)")
+            print("[SyncHistoryStore] 加载同步历史失败: \(error.localizedDescription)")
             entries = []
         }
     }
 
-    /// 保存历史记录到磁盘
+    /// 请求保存（debounce：延迟 0.5 秒后写入，合并多次快速调用）
+    private func requestSave() {
+        debounceTimer?.invalidate()
+        debounceTimer = Timer.scheduledTimer(withTimeInterval: debounceInterval, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            Task { @MainActor [weak self] in
+                self?.saveEntries()
+            }
+        }
+    }
+
+    /// 立即保存历史记录到磁盘（跳过 debounce）
+    func flush() {
+        debounceTimer?.invalidate()
+        debounceTimer = nil
+        saveEntries()
+    }
+
+    /// 保存历史记录到磁盘（内部方法）
     private func saveEntries() {
         do {
             let encoder = JSONEncoder()
@@ -59,7 +100,7 @@ class SyncHistoryStore: ObservableObject {
             let data = try encoder.encode(entries)
             try data.write(to: storageURL, options: .atomic)
         } catch {
-            print("保存同步历史失败: \(error.localizedDescription)")
+            print("[SyncHistoryStore] 保存同步历史失败: \(error.localizedDescription)")
         }
     }
 
@@ -74,7 +115,8 @@ class SyncHistoryStore: ObservableObject {
             entries = Array(entries.prefix(maxEntries))
         }
 
-        saveEntries()
+        // 使用 debounce 写入，避免频繁磁盘 I/O
+        requestSave()
     }
 
     /// 快捷方法：记录一次同步操作
@@ -104,25 +146,25 @@ class SyncHistoryStore: ObservableObject {
     /// 删除指定的历史记录
     func deleteEntry(_ entry: SyncHistoryEntry) {
         entries.removeAll { $0.id == entry.id }
-        saveEntries()
+        requestSave()
     }
 
     /// 按 ID 删除历史记录
     func deleteEntry(byID id: UUID) {
         entries.removeAll { $0.id == id }
-        saveEntries()
+        requestSave()
     }
 
     /// 清空所有历史记录
     func clearAll() {
         entries.removeAll()
-        saveEntries()
+        requestSave()
     }
 
     /// 清空指定项目的历史记录
     func clearEntries(forProjectID projectID: UUID) {
         entries.removeAll { $0.projectID == projectID }
-        saveEntries()
+        requestSave()
     }
 
     // MARK: - 查询

@@ -64,19 +64,19 @@ enum SyncStatus: String, Codable, CaseIterable {
     var displayName: String {
         switch self {
         case .synced:
-            return "已同步"
+            return String(localized: "已同步")
         case .syncing:
-            return "同步中"
+            return String(localized: "同步中")
         case .hasUpdate:
-            return "有更新"
+            return String(localized: "有更新")
         case .localAhead:
-            return "本地领先"
+            return String(localized: "本地领先")
         case .conflict:
-            return "冲突"
+            return String(localized: "冲突")
         case .error:
-            return "错误"
+            return String(localized: "错误")
         case .notSynced:
-            return "未同步"
+            return String(localized: "未同步")
         }
     }
 }

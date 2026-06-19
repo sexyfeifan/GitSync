@@ -32,49 +32,39 @@ class NotificationService: ObservableObject {
     // MARK: - 通知发送
 
     /// 发送同步完成通知
-    /// - Parameters:
-    ///   - projectName: 项目名称
-    ///   - message: 同步结果消息
     func postSyncCompleted(projectName: String, message: String) {
         let content = UNMutableNotificationContent()
-        content.title = "同步完成"
+        content.title = String(localized: "同步完成")
         content.subtitle = projectName
         content.body = message
         content.sound = .default
         content.categoryIdentifier = "SYNC_COMPLETED"
 
-        sendNotification(content: content, identifier: "sync-completed-\(projectName)-\(UUID().uuidString)")
+        sendNotification(content: content, identifier: "sync-completed-\(projectName)")
     }
 
     /// 发送批量同步完成通知
-    /// - Parameters:
-    ///   - totalCount: 总同步项目数
-    ///   - successCount: 成功数量
-    ///   - failureCount: 失败数量
     func postBatchSyncCompleted(totalCount: Int, successCount: Int, failureCount: Int) {
         let content = UNMutableNotificationContent()
-        content.title = "批量同步完成"
-        content.body = "共 \(totalCount) 个项目，成功 \(successCount) 个，失败 \(failureCount) 个"
+        content.title = String(localized: "批量同步完成")
+        content.body = String(localized: "共 \(totalCount) 个项目，成功 \(successCount) 个，失败 \(failureCount) 个")
         content.sound = .default
         content.categoryIdentifier = "BATCH_SYNC"
 
         if failureCount > 0 {
-            content.title = "批量同步完成（有失败）"
+            content.title = String(localized: "批量同步完成（有失败）")
             content.sound = .defaultCritical
         }
 
-        sendNotification(content: content, identifier: "batch-sync-\(UUID().uuidString)")
+        sendNotification(content: content, identifier: "batch-sync-completed")
     }
 
     /// 发送有更新通知
-    /// - Parameters:
-    ///   - projectName: 项目名称
-    ///   - updateCount: 更新数量
     func postHasUpdate(projectName: String, updateCount: Int = 1) {
         let content = UNMutableNotificationContent()
-        content.title = "有新更新"
+        content.title = String(localized: "有新更新")
         content.subtitle = projectName
-        content.body = "远程仓库有 \(updateCount) 个新提交，可拉取更新"
+        content.body = String(localized: "远程仓库有 \(updateCount) 个新提交，可拉取更新")
         content.sound = .default
         content.categoryIdentifier = "HAS_UPDATE"
 
@@ -82,14 +72,11 @@ class NotificationService: ObservableObject {
     }
 
     /// 发送冲突通知
-    /// - Parameters:
-    ///   - projectName: 项目名称
-    ///   - conflictFiles: 冲突文件列表
     func postConflict(projectName: String, conflictFiles: [String]) {
         let content = UNMutableNotificationContent()
-        content.title = "⚠️ 同步冲突"
+        content.title = String(localized: "⚠️ 同步冲突")
         content.subtitle = projectName
-        content.body = "检测到 \(conflictFiles.count) 个冲突文件：\(conflictFiles.prefix(3).joined(separator: "、"))"
+        content.body = String(localized: "检测到 \(conflictFiles.count) 个冲突文件：\(conflictFiles.prefix(3).joined(separator: "、"))")
         content.sound = .defaultCritical
         content.categoryIdentifier = "CONFLICT"
 
@@ -97,12 +84,9 @@ class NotificationService: ObservableObject {
     }
 
     /// 发送错误通知
-    /// - Parameters:
-    ///   - projectName: 项目名称（可选）
-    ///   - errorMessage: 错误消息
     func postError(projectName: String? = nil, errorMessage: String) {
         let content = UNMutableNotificationContent()
-        content.title = "同步错误"
+        content.title = String(localized: "同步错误")
         if let projectName = projectName {
             content.subtitle = projectName
         }
@@ -110,14 +94,14 @@ class NotificationService: ObservableObject {
         content.sound = .defaultCritical
         content.categoryIdentifier = "ERROR"
 
-        sendNotification(content: content, identifier: "error-\(projectName ?? "global")-\(UUID().uuidString)")
+        sendNotification(content: content, identifier: "error-\(projectName ?? "global")")
     }
 
     /// 发送网络断开通知
     func postNetworkDisconnected() {
         let content = UNMutableNotificationContent()
-        content.title = "网络已断开"
-        content.body = "自动同步已暂停，网络恢复后将自动继续"
+        content.title = String(localized: "网络已断开")
+        content.body = String(localized: "自动同步已暂停，网络恢复后将自动继续")
         content.sound = .default
         content.categoryIdentifier = "NETWORK"
 
@@ -127,8 +111,8 @@ class NotificationService: ObservableObject {
     /// 发送网络恢复通知
     func postNetworkRestored() {
         let content = UNMutableNotificationContent()
-        content.title = "网络已恢复"
-        content.body = "自动同步已恢复"
+        content.title = String(localized: "网络已恢复")
+        content.body = String(localized: "自动同步已恢复")
         content.sound = .default
         content.categoryIdentifier = "NETWORK"
 
@@ -143,7 +127,6 @@ class NotificationService: ObservableObject {
     }
 
     /// 清除指定标识符的通知
-    /// - Parameter identifier: 通知标识符
     func clearNotification(identifier: String) {
         center.removeDeliveredNotifications(withIdentifiers: [identifier])
     }
@@ -151,16 +134,17 @@ class NotificationService: ObservableObject {
     // MARK: - 私有方法
 
     /// 发送通知请求
-    /// - Parameters:
-    ///   - content: 通知内容
-    ///   - identifier: 通知标识符（用于去重和管理）
     private func sendNotification(content: UNMutableNotificationContent, identifier: String) {
+        // 先移除已发送的同标识符通知，确保新通知替换旧通知
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
 
         center.add(request) { error in
             if let error = error {
-                print("发送通知失败: \(error.localizedDescription)")
+                print("[NotificationService] 发送通知失败: \(error.localizedDescription)")
             }
         }
     }

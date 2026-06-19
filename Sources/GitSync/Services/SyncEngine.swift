@@ -28,9 +28,9 @@ final class SyncEngine {
 
     /// 初始化同步引擎
     /// - Parameters:
-    ///   - gitService: Git 服务实例
+    ///   - gitService: Git 服务实例，默认使用共享实例
     ///   - historyStore: 历史存储实例
-    init(gitService: GitService = GitService(), historyStore: SyncHistoryStore = SyncHistoryStore()) {
+    init(gitService: GitService = .shared, historyStore: SyncHistoryStore = SyncHistoryStore()) {
         self.gitService = gitService
         self.historyStore = historyStore
     }
@@ -46,19 +46,21 @@ final class SyncEngine {
 
         // 边界情况：目录不存在
         guard FileManager.default.fileExists(atPath: localPath.path) else {
-            recordSync(project: project, action: .sync, result: .failure,
-                      message: "本地目录不存在: \(localPath.path)", startTime: startTime,
+            let msg = String(localized: "本地目录不存在: \(localPath.path)")
+            await recordSync(project: project, action: .sync, result: .failure,
+                      message: msg, startTime: startTime,
                       fromCommit: nil)
-            return .error(message: "本地目录不存在: \(localPath.path)")
+            return .error(message: msg)
         }
 
         // 边界情况：不是 git 仓库（检查 .git 目录）
         let gitDir = localPath.appendingPathComponent(".git")
         guard FileManager.default.fileExists(atPath: gitDir.path) else {
-            recordSync(project: project, action: .sync, result: .failure,
-                      message: "不是 Git 仓库: \(localPath.path)", startTime: startTime,
+            let msg = String(localized: "不是 Git 仓库: \(localPath.path)")
+            await recordSync(project: project, action: .sync, result: .failure,
+                      message: msg, startTime: startTime,
                       fromCommit: nil)
-            return .error(message: "不是 Git 仓库: \(localPath.path)")
+            return .error(message: msg)
         }
 
         // 记录当前 commit hash（用于历史记录）
@@ -67,10 +69,11 @@ final class SyncEngine {
         // 步骤 1：获取远程最新引用
         switch gitService.fetch(at: localPath) {
         case .failure(let error):
-            recordSync(project: project, action: .sync, result: .failure,
-                      message: "Fetch 失败: \(error.localizedDescription)", startTime: startTime,
+            let msg = String(localized: "Fetch 失败: \(error.localizedDescription)")
+            await recordSync(project: project, action: .sync, result: .failure,
+                      message: msg, startTime: startTime,
                       fromCommit: fromCommit)
-            return .error(message: "Fetch 失败: \(error.localizedDescription)")
+            return .error(message: msg)
         case .success:
             break
         }
@@ -84,8 +87,8 @@ final class SyncEngine {
         // 步骤 4：根据远端和本地变更情况选择同步策略
         if !hasRemote && !hasLocal {
             // 双方都无变更，已是最新
-            recordSync(project: project, action: .sync, result: .noChange,
-                      message: "已是最新，无需同步", startTime: startTime,
+            await recordSync(project: project, action: .sync, result: .noChange,
+                      message: String(localized: "已是最新，无需同步"), startTime: startTime,
                       fromCommit: fromCommit)
             return .upToDate
         }
@@ -111,15 +114,16 @@ final class SyncEngine {
         switch gitService.pull(at: localPath, branch: project.branch) {
         case .success(let output):
             let toCommit = gitService.commitHash(at: localPath)
-            recordSync(project: project, action: .pull, result: .success,
-                      message: "拉取成功", startTime: startTime,
+            await recordSync(project: project, action: .pull, result: .success,
+                      message: String(localized: "拉取成功"), startTime: startTime,
                       fromCommit: fromCommit, toCommit: toCommit)
             return .success(message: output)
         case .failure(let error):
-            recordSync(project: project, action: .pull, result: .failure,
-                      message: "拉取失败: \(error.localizedDescription)", startTime: startTime,
+            let msg = String(localized: "拉取失败: \(error.localizedDescription)")
+            await recordSync(project: project, action: .pull, result: .failure,
+                      message: msg, startTime: startTime,
                       fromCommit: fromCommit)
-            return .error(message: "拉取失败: \(error.localizedDescription)")
+            return .error(message: msg)
         }
     }
 
@@ -128,28 +132,30 @@ final class SyncEngine {
         // 先提交本地未保存的变更
         let status = gitService.status(at: localPath)
         if !status.isClean {
-            let commitMessage = "自动同步提交 - \(Self.dateFormatter.string(from: Date()))"
+            let commitMessage = String(localized: "自动同步提交 - \(Self.dateFormatter.string(from: Date()))")
             let commitResult = gitService.commitAll(at: localPath, message: commitMessage)
             if case .failure(let error) = commitResult {
-                recordSync(project: project, action: .push, result: .failure,
-                          message: "提交本地变更失败: \(error.localizedDescription)", startTime: startTime,
+                let msg = String(localized: "提交本地变更失败: \(error.localizedDescription)")
+                await recordSync(project: project, action: .push, result: .failure,
+                          message: msg, startTime: startTime,
                           fromCommit: fromCommit)
-                return .error(message: "提交本地变更失败: \(error.localizedDescription)")
+                return .error(message: msg)
             }
         }
 
         switch gitService.push(at: localPath, branch: project.branch) {
         case .success(let output):
             let toCommit = gitService.commitHash(at: localPath)
-            recordSync(project: project, action: .push, result: .success,
-                      message: "推送成功", startTime: startTime,
+            await recordSync(project: project, action: .push, result: .success,
+                      message: String(localized: "推送成功"), startTime: startTime,
                       fromCommit: fromCommit, toCommit: toCommit)
             return .success(message: output)
         case .failure(let error):
-            recordSync(project: project, action: .push, result: .failure,
-                      message: "推送失败: \(error.localizedDescription)", startTime: startTime,
+            let msg = String(localized: "推送失败: \(error.localizedDescription)")
+            await recordSync(project: project, action: .push, result: .failure,
+                      message: msg, startTime: startTime,
                       fromCommit: fromCommit)
-            return .error(message: "推送失败: \(error.localizedDescription)")
+            return .error(message: msg)
         }
     }
 
@@ -158,13 +164,14 @@ final class SyncEngine {
         // 1. 先提交本地所有变更
         let status = gitService.status(at: localPath)
         if !status.isClean {
-            let commitMessage = "自动同步提交 - \(Self.dateFormatter.string(from: Date()))"
+            let commitMessage = String(localized: "自动同步提交 - \(Self.dateFormatter.string(from: Date()))")
             let commitResult = gitService.commitAll(at: localPath, message: commitMessage)
             if case .failure(let error) = commitResult {
-                recordSync(project: project, action: .sync, result: .failure,
-                          message: "提交本地变更失败: \(error.localizedDescription)", startTime: startTime,
+                let msg = String(localized: "提交本地变更失败: \(error.localizedDescription)")
+                await recordSync(project: project, action: .sync, result: .failure,
+                          message: msg, startTime: startTime,
                           fromCommit: fromCommit)
-                return .error(message: "提交本地变更失败: \(error.localizedDescription)")
+                return .error(message: msg)
             }
         }
 
@@ -176,26 +183,27 @@ final class SyncEngine {
             switch gitService.push(at: localPath, branch: project.branch) {
             case .success(let output):
                 let toCommit = gitService.commitHash(at: localPath)
-                recordSync(project: project, action: .sync, result: .success,
-                          message: "Rebase 并推送成功", startTime: startTime,
+                await recordSync(project: project, action: .sync, result: .success,
+                          message: String(localized: "Rebase 并推送成功"), startTime: startTime,
                           fromCommit: fromCommit, toCommit: toCommit)
-                return .success(message: "Rebase 成功并已推送: \(output)")
+                return .success(message: String(localized: "Rebase 成功并已推送: \(output)"))
             case .failure(let error):
-                recordSync(project: project, action: .sync, result: .failure,
-                          message: "推送失败（rebase 后）: \(error.localizedDescription)", startTime: startTime,
+                let msg = String(localized: "推送失败（rebase 后）: \(error.localizedDescription)")
+                await recordSync(project: project, action: .sync, result: .failure,
+                          message: msg, startTime: startTime,
                           fromCommit: fromCommit)
-                return .error(message: "推送失败（rebase 后）: \(error.localizedDescription)")
+                return .error(message: msg)
             }
 
         case .failure:
             // rebase 失败，说明有冲突
-            // rebase 已被中止（GitService.rebase 会自动 abort）
             let conflictFiles = status.conflictFiles
             let details = conflictFiles.joined(separator: ", ")
-            recordSync(project: project, action: .sync, result: .conflict,
-                      message: "冲突文件: \(details)", startTime: startTime,
+            let msg = String(localized: "冲突文件: \(details)")
+            await recordSync(project: project, action: .sync, result: .conflict,
+                      message: msg, startTime: startTime,
                       fromCommit: fromCommit)
-            return .conflict(details: "冲突文件: \(details)")
+            return .conflict(details: msg)
         }
     }
 
@@ -206,7 +214,7 @@ final class SyncEngine {
         gitService.commitHash(at: path)
     }
 
-    /// 记录同步历史到 SyncHistoryStore
+    /// 记录同步历史到 SyncHistoryStore（异步，确保在 MainActor 上执行）
     private func recordSync(
         project: SyncProject,
         action: SyncAction,
@@ -215,18 +223,23 @@ final class SyncEngine {
         startTime: Date,
         fromCommit: String?,
         toCommit: String? = nil
-    ) {
+    ) async {
         let duration = Date().timeIntervalSince(startTime)
-        historyStore.recordSync(
-            projectID: project.id,
-            projectName: project.name,
-            action: action,
-            result: result,
-            message: message,
-            duration: duration,
-            fromCommit: fromCommit,
-            toCommit: toCommit
-        )
+        let store = historyStore
+        let pid = project.id
+        let pname = project.name
+        await MainActor.run {
+            store.recordSync(
+                projectID: pid,
+                projectName: pname,
+                action: action,
+                result: result,
+                message: message,
+                duration: duration,
+                fromCommit: fromCommit,
+                toCommit: toCommit
+            )
+        }
     }
 
     /// 日期格式化器（用于提交信息）

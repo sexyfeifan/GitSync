@@ -68,8 +68,12 @@ class AutoSyncService: ObservableObject {
     private var syncTimer: Timer?
 
     /// 自动同步间隔（秒）
+    /// 注意：设置界面存储的是分钟值（1/5/15/60），需要乘以 60 转换为秒
     private var autoSyncInterval: TimeInterval {
-        UserDefaults.standard.double(forKey: "autoSyncInterval").clamped(to: 60...3600, defaultValue: 300)
+        let minutes = UserDefaults.standard.double(forKey: "autoSyncInterval")
+        // 默认 5 分钟 = 300 秒
+        guard minutes > 0 else { return 300 }
+        return (minutes * 60.0).clamped(to: 60...3600, defaultValue: 300)
     }
 
     /// 自动同步是否启用
@@ -98,7 +102,7 @@ class AutoSyncService: ObservableObject {
         self.historyStore = historyStore
         self.notificationService = notificationService
         self.networkMonitor = networkMonitor
-        self.syncEngine = SyncEngine(historyStore: historyStore)
+        self.syncEngine = SyncEngine(gitService: .shared, historyStore: historyStore)
 
         // 恢复暂停状态
         self.isPaused = UserDefaults.standard.bool(forKey: "autoSyncPaused")
@@ -135,10 +139,14 @@ class AutoSyncService: ObservableObject {
             }
         }
 
-        // 监听 UserDefaults 变化
+        // 监听 UserDefaults 变化，确保在主线程处理
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.handleDefaultsChanged()
+                guard let self = self else { return }
+                MainActor.assumeIsolated {
+                    self.handleDefaultsChanged()
+                }
             }
             .store(in: &cancellables)
     }
@@ -266,7 +274,7 @@ class AutoSyncService: ObservableObject {
     /// - Parameter project: 要同步的项目
     /// - Returns: 同步结果
     private func syncSingleProject(_ project: SyncProject) async -> GitSyncResult {
-        projectStore.updateSyncStatus(for: project.id, status: .syncing, message: "自动同步中...")
+        projectStore.updateSyncStatus(for: project.id, status: .syncing, message: String(localized: "自动同步中..."))
 
         let result = await syncEngine.syncProject(project)
 
@@ -275,9 +283,9 @@ class AutoSyncService: ObservableObject {
             projectStore.updateSyncStatus(for: project.id, status: .synced, message: message)
             notificationService.postSyncCompleted(projectName: project.name, message: message)
         case .upToDate:
-            projectStore.updateSyncStatus(for: project.id, status: .synced, message: "已是最新")
+            projectStore.updateSyncStatus(for: project.id, status: .synced, message: String(localized: "已是最新"))
         case .conflict(let details):
-            projectStore.updateSyncStatus(for: project.id, status: .conflict, message: "冲突：\(details)")
+            projectStore.updateSyncStatus(for: project.id, status: .conflict, message: String(localized: "冲突：\(details)"))
         case .error(let message):
             projectStore.updateSyncStatus(for: project.id, status: .error, message: message)
         }

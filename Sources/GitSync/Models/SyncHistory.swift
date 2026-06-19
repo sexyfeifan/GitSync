@@ -104,21 +104,21 @@ struct SyncHistoryEntry: Codable, Identifiable {
     /// 操作类型的中文显示名称
     var actionDisplayName: String {
         switch action {
-        case .pull: return "拉取"
-        case .push: return "推送"
-        case .sync: return "同步"
-        case .clone: return "克隆"
-        case .resolveConflict: return "解决冲突"
+        case .pull: return String(localized: "拉取")
+        case .push: return String(localized: "推送")
+        case .sync: return String(localized: "同步")
+        case .clone: return String(localized: "克隆")
+        case .resolveConflict: return String(localized: "解决冲突")
         }
     }
 
     /// 操作结果的中文显示名称
     var resultDisplayName: String {
         switch result {
-        case .success: return "成功"
-        case .failure: return "失败"
-        case .noChange: return "无变更"
-        case .conflict: return "冲突"
+        case .success: return String(localized: "成功")
+        case .failure: return String(localized: "失败")
+        case .noChange: return String(localized: "无变更")
+        case .conflict: return String(localized: "冲突")
         }
     }
 
@@ -135,13 +135,18 @@ struct SyncHistoryEntry: Codable, Identifiable {
         }
     }
 
-    /// 操作时间的格式化显示
-    var performedAtFormatted: String {
+    /// 缓存的日期格式化器（避免每次创建新实例）
+    private static let cachedDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateStyle = .medium
         formatter.timeStyle = .medium
-        return formatter.string(from: performedAt)
+        return formatter
+    }()
+
+    /// 操作时间的格式化显示
+    var performedAtFormatted: String {
+        Self.cachedDateFormatter.string(from: performedAt)
     }
 
     /// 是否为成功操作

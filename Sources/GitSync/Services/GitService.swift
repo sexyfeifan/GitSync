@@ -18,15 +18,15 @@ enum GitError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case let .commandFailed(command, code, output):
-            return "Git 命令失败（退出码 \(code)）: \(command)\n\(output)"
+            return String(localized: "Git 命令失败（退出码 \(code)）: \(command)\n\(output)")
         case let .pathNotFound(path):
-            return "路径不存在: \(path)"
+            return String(localized: "路径不存在: \(path)")
         case let .notGitRepository(path):
-            return "不是 Git 仓库: \(path)"
+            return String(localized: "不是 Git 仓库: \(path)")
         case let .cloneFailed(url, reason):
-            return "克隆仓库失败 \(url): \(reason)"
+            return String(localized: "克隆仓库失败 \(url): \(reason)")
         case let .conflict(details):
-            return "合并冲突: \(details)"
+            return String(localized: "合并冲突: \(details)")
         }
     }
 }
@@ -59,6 +59,9 @@ struct GitStatus {
 /// Git CLI 封装，通过 Process 执行 git 命令
 /// 参考 NookDesk 的 ProcessRunner 模式，使用临时文件捕获输出
 final class GitService {
+    /// 共享实例，避免每次调用都创建新对象
+    static let shared = GitService()
+
     /// 额外的 PATH 组件，会在执行命令前添加到环境变量
     var extraPATHComponents: [String]
 
@@ -334,8 +337,13 @@ final class GitService {
             case ("M", "M"):
                 modified.append(filePath)
             case ("R", _):
-                // 重命名：视为修改
-                modified.append(filePath)
+                // 重命名操作：格式为 "old_path -> new_path"，提取新路径
+                if let arrowIndex = filePath.range(of: " -> ") {
+                    let newPath = String(filePath[arrowIndex.upperBound...])
+                    modified.append(newPath)
+                } else {
+                    modified.append(filePath)
+                }
             default:
                 modified.append(filePath)
             }
@@ -366,9 +374,29 @@ final class GitService {
         return env
     }
 
-    /// 执行 git 命令并返回输出
+    /// 执行 git 命令并返回输出（同步版本，用于兼容现有调用链）
     /// 使用临时文件捕获 stdout/stderr，避免内存管道缓冲问题
     private func runGit(args: [String], in cwd: URL) throws -> (stdout: String, stderr: String) {
+        try runGitBlocking(args: args, in: cwd)
+    }
+
+    /// 异步版本：使用 withCheckedContinuation 包装，避免阻塞线程池
+    private func runGitAsync(args: [String], in cwd: URL) async throws -> (stdout: String, stderr: String) {
+        try await withCheckedThrowingContinuation { continuation in
+            // 在后台队列执行 Process，避免阻塞主线程
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let result = try self.runGitBlocking(args: args, in: cwd)
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// 实际执行 git 命令的阻塞实现（供同步和异步版本共用）
+    private func runGitBlocking(args: [String], in cwd: URL) throws -> (stdout: String, stderr: String) {
         let process = Process()
         let fm = FileManager.default
         process.currentDirectoryURL = cwd

@@ -54,6 +54,39 @@ struct GitHubParent: Codable {
     }
 }
 
+// MARK: - GitHub 服务错误
+
+/// GitHub API 相关错误，保留完整错误上下文
+enum GitHubServiceError: LocalizedError {
+    /// URL 格式无效
+    case invalidURL(url: String)
+    /// HTTP 请求返回非成功状态码
+    case httpError(statusCode: Int, body: String)
+    /// Token 保存到 Keychain 失败
+    case tokenSaveFailed(status: OSStatus)
+    /// JSON 解码失败
+    case decodingFailed(url: String, underlying: Error)
+    /// 网络请求异常
+    case networkError(url: String, underlying: Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL(let url):
+            return "无效的 URL：\(url)"
+        case .httpError(let statusCode, let body):
+            // 截断过长的响应体，保留前 200 字符
+            let truncated = body.count > 200 ? String(body.prefix(200)) + "..." : body
+            return "HTTP 请求失败（状态码 \(statusCode)）：\(truncated)"
+        case .tokenSaveFailed(let status):
+            return "保存 GitHub Token 到 Keychain 失败（OSStatus: \(status)）"
+        case .decodingFailed(let url, let underlying):
+            return "响应解析失败（\(url)）：\(underlying.localizedDescription)"
+        case .networkError(let url, let underlying):
+            return "网络请求失败（\(url)）：\(underlying.localizedDescription)"
+        }
+    }
+}
+
 // MARK: - GitHub API 服务
 
 /// GitHub REST API 封装，使用 URLSession + async/await
@@ -81,8 +114,8 @@ final class GitHubService {
     /// - Parameters:
     ///   - owner: 仓库所有者
     ///   - name: 仓库名
-    /// - Returns: 仓库信息，失败返回 nil
-    func fetchRepo(owner: String, name: String) async -> GitHubRepo? {
+    /// - Returns: Result 包含仓库信息或错误
+    func fetchRepo(owner: String, name: String) async -> Result<GitHubRepo, GitHubServiceError> {
         let url = "\(baseURL)/repos/\(owner)/\(name)"
         return await performRequest(url: url, method: "GET")
     }
@@ -91,14 +124,14 @@ final class GitHubService {
     /// - Parameters:
     ///   - owner: 源仓库所有者
     ///   - name: 源仓库名
-    /// - Returns: fork 后的仓库信息，失败返回 nil
-    func forkRepo(owner: String, name: String) async -> GitHubRepo? {
+    /// - Returns: Result 包含 fork 后的仓库信息或错误
+    func forkRepo(owner: String, name: String) async -> Result<GitHubRepo, GitHubServiceError> {
         let url = "\(baseURL)/repos/\(owner)/\(name)/forks"
         return await performRequest(url: url, method: "POST")
     }
 
     /// 列出当前用户的所有仓库
-    /// - Returns: 仓库列表
+    /// - Returns: 仓库列表（分页获取，遇到错误时停止并返回已获取的部分）
     func listUserRepos() async -> [GitHubRepo] {
         // 分页获取所有仓库（每页 100 个）
         var allRepos: [GitHubRepo] = []
@@ -106,18 +139,20 @@ final class GitHubService {
 
         while true {
             let url = "\(baseURL)/user/repos?per_page=100&page=\(page)&sort=updated"
-            guard let repos: [GitHubRepo] = await performRequest(url: url, method: "GET") else {
-                break
+            let result: Result<[GitHubRepo], GitHubServiceError> = await performRequest(url: url, method: "GET")
+            switch result {
+            case .success(let repos):
+                allRepos.append(contentsOf: repos)
+                // 如果返回数量不足 100，说明已经是最后一页
+                if repos.count < 100 {
+                    return allRepos
+                }
+                page += 1
+            case .failure:
+                // 遇到错误时返回已获取的部分
+                return allRepos
             }
-            allRepos.append(contentsOf: repos)
-            // 如果返回数量不足 100，说明已经是最后一页
-            if repos.count < 100 {
-                break
-            }
-            page += 1
         }
-
-        return allRepos
     }
 
     /// 检查指定 owner 是否为当前用户（即是否是自己的仓库）
@@ -140,8 +175,13 @@ final class GitHubService {
         guard let currentUser = await fetchCurrentUser() else {
             return false
         }
-        let repo = await fetchRepo(owner: currentUser, name: name)
-        return repo?.isFork == true
+        let result = await fetchRepo(owner: currentUser, name: name)
+        switch result {
+        case .success(let repo):
+            return repo.isFork
+        case .failure:
+            return false
+        }
     }
 
     // MARK: - URL 解析
@@ -192,17 +232,24 @@ final class GitHubService {
         struct UserResponse: Codable {
             let login: String
         }
-        let user: UserResponse? = await performRequest(url: url, method: "GET")
-        return user?.login
+        let result: Result<UserResponse, GitHubServiceError> = await performRequest(url: url, method: "GET")
+        switch result {
+        case .success(let user):
+            return user.login
+        case .failure:
+            return nil
+        }
     }
 
     /// 执行 GitHub API 请求并解码响应
     /// - Parameters:
     ///   - url: 完整 API URL
     ///   - method: HTTP 方法
-    /// - Returns: 解码后的对象，失败返回 nil
-    private func performRequest<T: Decodable>(url: String, method: String) async -> T? {
-        guard let requestURL = URL(string: url) else { return nil }
+    /// - Returns: Result 包含解码后的对象或具体错误信息
+    private func performRequest<T: Decodable>(url: String, method: String) async -> Result<T, GitHubServiceError> {
+        guard let requestURL = URL(string: url) else {
+            return .failure(.invalidURL(url: url))
+        }
 
         var request = URLRequest(url: requestURL)
         request.httpMethod = method
@@ -219,23 +266,21 @@ final class GitHubService {
 
             // 检查 HTTP 状态码
             guard let httpResponse = response as? HTTPURLResponse else {
-                return nil
+                return .failure(.networkError(url: url, underlying: URLError(.badServerResponse)))
             }
 
             // 成功状态码范围：200-299
             guard (200...299).contains(httpResponse.statusCode) else {
-                // 打印错误信息便于调试
-                let errorBody = String(data: data, encoding: .utf8) ?? "无响应体"
-                print("[GitHubService] 请求失败 (\(httpResponse.statusCode)): \(url)\n\(errorBody)")
-                return nil
+                let errorBody = String(data: data, encoding: .utf8) ?? ""
+                return .failure(.httpError(statusCode: httpResponse.statusCode, body: errorBody))
             }
 
             // 解码 JSON 响应
             let decoder = JSONDecoder()
-            return try decoder.decode(T.self, from: data)
+            let decoded = try decoder.decode(T.self, from: data)
+            return .success(decoded)
         } catch {
-            print("[GitHubService] 请求异常: \(url) - \(error.localizedDescription)")
-            return nil
+            return .failure(.networkError(url: url, underlying: error))
         }
     }
 
@@ -243,7 +288,7 @@ final class GitHubService {
 
     /// 从存储中读取 GitHub Token
     /// 优先从 Keychain 读取，其次从 UserDefaults 读取
-    private static func loadTokenFromStorage() -> String? {
+    static func loadTokenFromStorage() -> String? {
         // 优先从 Keychain 读取
         if let keychainToken = loadFromKeychain(), !keychainToken.isEmpty {
             return keychainToken
@@ -298,19 +343,6 @@ final class GitHubService {
             guard addStatus == errSecSuccess || addStatus == errSecDuplicateItem else {
                 throw GitHubServiceError.tokenSaveFailed(status: addStatus)
             }
-        }
-    }
-}
-
-// MARK: - GitHub 服务错误
-
-enum GitHubServiceError: LocalizedError {
-    case tokenSaveFailed(status: OSStatus)
-
-    var errorDescription: String? {
-        switch self {
-        case let .tokenSaveFailed(status):
-            return "保存 GitHub Token 到 Keychain 失败（OSStatus: \(status)）"
         }
     }
 }
