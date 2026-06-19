@@ -4,6 +4,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import os
 
 /// 菜单栏应用状态，用于驱动状态栏图标变化
 enum SyncAppStatus: Equatable {
@@ -86,7 +87,8 @@ class AutoSyncService: ObservableObject {
         self.notificationService = notificationService
         self.networkMonitor = networkMonitor
 
-        let syncEngine = SyncEngine(gitService: .shared, historyStore: historyStore)
+        // 使用共享 SyncEngine 实例，避免重复创建
+        let syncEngine = SyncEngineFactory.shared(historyStore: historyStore)
         self.resultHandler = SyncResultHandler(
             syncEngine: syncEngine,
             projectStore: projectStore,
@@ -131,9 +133,10 @@ class AutoSyncService: ObservableObject {
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self = self else { return }
-                MainActor.assumeIsolated {
-                    self.handleDefaultsChanged()
+                // 使用 Task 切换到 MainActor，兼容 macOS 13
+                // （MainActor.assumeIsolated 需要 macOS 14+）
+                Task { @MainActor [weak self] in
+                    self?.handleDefaultsChanged()
                 }
             }
             .store(in: &cancellables)
@@ -166,7 +169,7 @@ class AutoSyncService: ObservableObject {
             }
         }
 
-        print("自动同步定时器已启动，间隔：\(Int(interval)) 秒")
+        Log.sync.info("自动同步定时器已启动，间隔：\(Int(interval)) 秒")
     }
 
     /// 停止自动同步定时器

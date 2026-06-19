@@ -41,6 +41,9 @@ struct SettingsView: View {
     // MARK: - maxEntries 配置
     @AppStorage("maxHistoryEntries") private var maxHistoryEntries = AppConstants.maxHistoryEntries
 
+    // MARK: - 通知偏好配置
+    @AppStorage("notificationPreference") private var notificationPreference: NotificationPreference = .all
+
     var body: some View {
         TabView {
             // 通用设置
@@ -74,7 +77,7 @@ struct SettingsView: View {
             }
         } message: {
             if let project = projectToDelete {
-                Text(String(localized: "确定要删除项目「\(project.name)」吗？\n本地文件路径：\(project.localPath)"))
+                Text(String(localized: "确定要删除项目「\(project.name)」吗？\n\n⚠️ 本地文件路径：\(project.localPath)\n\n选择「删除记录和本地文件」将永久删除本地仓库文件，此操作不可恢复。"))
             }
         }
     }
@@ -125,6 +128,18 @@ struct SettingsView: View {
                 .accessibilityLabel(String(localized: "历史记录最大数量"))
                 .accessibilityHint(String(localized: "设置同步历史记录保留的最大条数"))
                 Text(String(localized: "超出限制时自动删除最旧的记录"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section(String(localized: "通知")) {
+                Picker(String(localized: "通知偏好"), selection: $notificationPreference) {
+                    ForEach(NotificationPreference.allCases, id: \.self) { pref in
+                        Text(pref.displayName).tag(pref)
+                    }
+                }
+                .accessibilityHint(String(localized: "选择接收通知的类型"))
+                Text(String(localized: "控制同步完成后是否发送系统通知"))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

@@ -8,6 +8,7 @@ struct ProjectRowView: View {
     /// 删除请求回调（由父视图处理确认弹窗）
     let onDeleteRequested: (SyncProject) -> Void
     @EnvironmentObject var projectStore: ProjectStore
+    @EnvironmentObject var historyStore: SyncHistoryStore
 
     var body: some View {
         HStack(spacing: 10) {
@@ -89,9 +90,9 @@ struct ProjectRowView: View {
         }
     }
 
-    /// 同步单个项目（通过 SyncResultHandler 统一处理）
+    /// 同步单个项目（通过 SyncResultHandler 统一处理，使用共享 SyncEngine）
     private func syncSingleProject(_ project: SyncProject) async {
-        let syncEngine = SyncEngine(gitService: .shared)
+        let syncEngine = SyncEngineFactory.shared(historyStore: historyStore)
         let handler = SyncResultHandler(
             syncEngine: syncEngine,
             projectStore: projectStore

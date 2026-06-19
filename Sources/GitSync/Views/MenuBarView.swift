@@ -27,6 +27,12 @@ struct MenuBarView: View {
     /// 待删除的项目
     @State private var projectToDelete: SyncProject?
 
+    // MARK: - 撤销删除状态
+    /// 最近被删除的项目（用于撤销操作）
+    @State private var lastDeletedProject: SyncProject?
+    /// 撤销计时器
+    @State private var undoTimer: Timer?
+
     // MARK: - 批量同步进度
     /// 当前正在同步的项目名（用于批量同步时显示进度）
     @State private var currentSyncingProject: String?
@@ -144,7 +150,11 @@ struct MenuBarView: View {
             }
             Button(String(localized: "仅删除记录")) {
                 if let project = projectToDelete {
+                    // 保存被删除的项目，以便撤销
+                    lastDeletedProject = project
                     projectStore.deleteProject(project)
+                    // 启动撤销计时器（5秒后清除撤销状态）
+                    startUndoTimer()
                 }
                 projectToDelete = nil
             }
@@ -156,7 +166,31 @@ struct MenuBarView: View {
             }
         } message: {
             if let project = projectToDelete {
-                Text(String(localized: "确定要删除项目「\(project.name)」吗？\n本地文件路径：\(project.localPath)"))
+                Text(String(localized: "确定要删除项目「\(project.name)」吗？\n\n⚠️ 本地文件路径：\(project.localPath)\n\n选择「删除记录和本地文件」将永久删除本地仓库文件，此操作不可恢复。"))
+            }
+        }
+        // 撤销删除提示条
+        .overlay(alignment: .bottom) {
+            if let deleted = lastDeletedProject {
+                HStack {
+                    Text(String(localized: "已删除「\(deleted.name)」"))
+                        .font(.caption)
+                    Spacer()
+                    Button(String(localized: "撤销")) {
+                        // 恢复项目
+                        projectStore.addProject(deleted)
+                        lastDeletedProject = nil
+                        undoTimer?.invalidate()
+                        undoTimer = nil
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .padding(8)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(8)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 40)
             }
         }
     }
@@ -171,7 +205,8 @@ struct MenuBarView: View {
         isSyncingAll = true
         currentSyncingProject = nil
 
-        let syncEngine = SyncEngine(gitService: .shared, historyStore: historyStore)
+        // 使用共享 SyncEngine 实例，避免每次批量同步都创建新实例
+        let syncEngine = SyncEngineFactory.shared(historyStore: historyStore)
         let handler = SyncResultHandler(
             syncEngine: syncEngine,
             projectStore: projectStore
@@ -183,5 +218,16 @@ struct MenuBarView: View {
 
         currentSyncingProject = nil
         isSyncingAll = false
+    }
+
+    /// 启动撤销计时器（5秒后自动清除撤销状态）
+    private func startUndoTimer() {
+        undoTimer?.invalidate()
+        undoTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in
+            Task { @MainActor in
+                lastDeletedProject = nil
+                undoTimer = nil
+            }
+        }
     }
 }

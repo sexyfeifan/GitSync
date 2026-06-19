@@ -119,6 +119,8 @@ enum GitHubServiceError: LocalizedError {
 
 /// GitHub REST API 封装，使用 URLSession + async/await
 /// Token 从 UserDefaults 或 Keychain 读取
+/// 标记 @MainActor 保护缓存属性（cachedCurrentUser / hasCachedUser）的并发访问安全
+@MainActor
 final class GitHubService {
     /// API 基础 URL
     private let baseURL = AppConstants.gitHubAPIBaseURL
@@ -130,13 +132,6 @@ final class GitHubService {
     private var cachedCurrentUser: String?
     /// 缓存是否已填充
     private var hasCachedUser: Bool = false
-
-    /// User-Agent 版本号（从 Bundle.main 获取）
-    private static let userAgent: String = {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-        return "GitSync/\(version) (\(build))"
-    }()
 
     /// 初始化 GitHub 服务
     /// - Parameters:
@@ -241,7 +236,7 @@ final class GitHubService {
     /// - https://github.com/owner/repo
     /// - Parameter url: 仓库 URL 字符串
     /// - Returns: (owner, name) 元组，解析失败返回 nil
-    static func parseRepoURL(_ url: String) -> (owner: String, name: String)? {
+    nonisolated static func parseRepoURL(_ url: String) -> (owner: String, name: String)? {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 处理 SSH 格式：git@github.com:owner/repo.git
@@ -269,7 +264,7 @@ final class GitHubService {
     // MARK: - 私有辅助方法
 
     /// 去掉仓库名末尾的 .git 后缀
-    private static func stripGitSuffix(_ name: String) -> String {
+    nonisolated private static func stripGitSuffix(_ name: String) -> String {
         guard name.hasSuffix(".git") else { return name }
         return String(name.dropLast(4))
     }
@@ -307,7 +302,7 @@ final class GitHubService {
         var request = URLRequest(url: requestURL)
         request.httpMethod = method
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(AppConstants.userAgent, forHTTPHeaderField: "User-Agent")
 
         // 添加认证 header（如果有 token）
         if let token = token, !token.isEmpty {
@@ -354,7 +349,7 @@ final class GitHubService {
     // MARK: - Token 存储
 
     /// 从存储中读取 GitHub Token（统一从 Keychain 读取）
-    static func loadTokenFromStorage() -> String? {
+    nonisolated static func loadTokenFromStorage() -> String? {
         // 统一从 Keychain 读取，不再回退到 UserDefaults
         if let keychainToken = loadFromKeychain(), !keychainToken.isEmpty {
             return keychainToken
@@ -369,7 +364,7 @@ final class GitHubService {
     }
 
     /// 从 Keychain 读取 GitHub Token
-    private static func loadFromKeychain() -> String? {
+    nonisolated private static func loadFromKeychain() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: AppConstants.keychainServiceName,
@@ -391,7 +386,7 @@ final class GitHubService {
     /// 保存 GitHub Token 到 Keychain
     /// - Parameter token: 要保存的 token
     /// - Throws: 保存失败时抛出错误
-    static func saveToken(_ token: String) throws {
+    nonisolated static func saveToken(_ token: String) throws {
         let data = token.data(using: .utf8) ?? Data()
 
         // 先尝试更新已有条目

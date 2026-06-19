@@ -3,13 +3,14 @@
 
 import Foundation
 import SwiftUI
+import os
 
 /// 项目数据存储管理器
 @MainActor
 class ProjectStore: ObservableObject {
-    /// 防抖 Task，避免频繁写磁盘
-    private var debounceTask: Task<Void, Never>?
-
+    /// debounce 写入的 Timer，避免频繁磁盘写入
+    /// 使用 Timer 而非 Task.sleep，与 SyncHistoryStore 保持一致，更可靠
+    private var debounceTimer: Timer?
 
     /// 项目列表
     @Published var projects: [SyncProject] = []
@@ -35,6 +36,13 @@ class ProjectStore: ObservableObject {
         loadProjects()
     }
 
+    /// 立即保存项目到磁盘（跳过 debounce），用于应用退出时调用
+    func flush() {
+        debounceTimer?.invalidate()
+        debounceTimer = nil
+        writeProjectsToDisk()
+    }
+
     // MARK: - 持久化操作
 
     /// 从磁盘加载项目列表
@@ -50,22 +58,21 @@ class ProjectStore: ObservableObject {
             decoder.dateDecodingStrategy = .iso8601
             projects = try decoder.decode([SyncProject].self, from: data)
         } catch {
-            print("[ProjectStore] 加载项目数据失败: \(error.localizedDescription)")
+            Log.storage.error("加载项目数据失败: \(error.localizedDescription)")
             projects = []
         }
     }
 
     /// 保存项目列表到磁盘（防抖：延迟 0.5 秒，合并多次快速调用）
     private func saveProjects() {
-        // 取消之前的待写入操作
-        debounceTask?.cancel()
-
-        // 创建新的防抖任务
-        debounceTask = Task { [weak self] in
-            // 延迟 0.5 秒，期间如有新调用会被取消
-            try? await Task.sleep(nanoseconds: AppConstants.debounceDelayNanoseconds)
-            guard !Task.isCancelled else { return }
-            self?.writeProjectsToDisk()
+        // 取消之前的防抖 Timer
+        debounceTimer?.invalidate()
+        // 使用 Timer 防抖，与 SyncHistoryStore 保持一致的实现
+        debounceTimer = Timer.scheduledTimer(withTimeInterval: AppConstants.debounceDelay, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            Task { @MainActor [weak self] in
+                self?.writeProjectsToDisk()
+            }
         }
     }
 
@@ -83,7 +90,7 @@ class ProjectStore: ObservableObject {
             let data = try encoder.encode(projects)
             try data.write(to: storageURL, options: .atomic)
         } catch {
-            print("[ProjectStore] 保存项目数据失败: \(error.localizedDescription)")
+            Log.storage.error("保存项目数据失败: \(error.localizedDescription)")
         }
 
         // 步骤 3：清理超出上限的旧备份

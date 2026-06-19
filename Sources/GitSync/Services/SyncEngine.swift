@@ -1,11 +1,5 @@
 import Foundation
 
-// MARK: - Git 同步结果
-
-/// Git 同步引擎的返回结果
-/// 已统一为 Models/AppResult.swift 中的 AppSyncResult 类型
-typealias GitSyncResult = AppSyncResult
-
 // MARK: - 同步引擎
 
 /// Git 同步引擎，协调本地和远程仓库的同步流程
@@ -20,8 +14,8 @@ final class SyncEngine {
     /// 初始化同步引擎
     /// - Parameters:
     ///   - gitService: Git 服务实例，默认使用共享实例
-    ///   - historyStore: 历史存储实例
-    init(gitService: GitServiceProtocol = GitService.shared, historyStore: SyncHistoryStore = SyncHistoryStore()) {
+    ///   - historyStore: 历史存储实例（必须显式注入，不提供默认值）
+    init(gitService: GitServiceProtocol = GitService.shared, historyStore: SyncHistoryStore) {
         self.gitService = gitService
         self.historyStore = historyStore
     }
@@ -31,7 +25,7 @@ final class SyncEngine {
     /// 边界情况处理：目录不存在、不是 git 仓库、网络不可达等
     /// - Parameter project: 要同步的项目（使用 Models/SyncProject.swift 中定义的类型）
     /// - Returns: 同步结果
-    func syncProject(_ project: SyncProject) async -> GitSyncResult {
+    func syncProject(_ project: SyncProject) async -> AppSyncResult {
         let localPath = project.localURL
         let startTime = Date()
 
@@ -55,10 +49,10 @@ final class SyncEngine {
         }
 
         // 记录当前 commit hash（用于历史记录）
-        let fromCommit = gitService.commitHash(at: localPath)
+        let fromCommit = await gitService.commitHash(at: localPath)
 
         // 步骤 1：获取远程最新引用
-        switch gitService.fetch(at: localPath) {
+        switch await gitService.fetch(at: localPath) {
         case .failure(let error):
             let msg = String(localized: "Fetch 失败: \(error.localizedDescription)")
             await recordSync(project: project, action: .sync, result: .failure,
@@ -70,10 +64,10 @@ final class SyncEngine {
         }
 
         // 步骤 2：检测远端是否有变更
-        let hasRemote = gitService.hasRemoteChanges(localPath: localPath)
+        let hasRemote = await gitService.hasRemoteChanges(localPath: localPath)
 
         // 步骤 3：检测本地是否有变更
-        let hasLocal = gitService.hasLocalChanges(localPath: localPath)
+        let hasLocal = await gitService.hasLocalChanges(localPath: localPath)
 
         // 步骤 4：根据远端和本地变更情况选择同步策略
         if !hasRemote && !hasLocal {
@@ -101,10 +95,10 @@ final class SyncEngine {
     // MARK: - 同步策略
 
     /// 仅拉取远端更新
-    private func pullOnly(project: SyncProject, localPath: URL, startTime: Date, fromCommit: String?) async -> GitSyncResult {
-        switch gitService.pull(at: localPath, branch: project.branch) {
+    private func pullOnly(project: SyncProject, localPath: URL, startTime: Date, fromCommit: String?) async -> AppSyncResult {
+        switch await gitService.pull(at: localPath, branch: project.branch) {
         case .success(let output):
-            let toCommit = gitService.commitHash(at: localPath)
+            let toCommit = await gitService.commitHash(at: localPath)
             await recordSync(project: project, action: .pull, result: .success,
                       message: String(localized: "拉取成功"), startTime: startTime,
                       fromCommit: fromCommit, toCommit: toCommit)
@@ -119,10 +113,10 @@ final class SyncEngine {
     }
 
     /// 仅推送本地更新
-    private func pushOnly(project: SyncProject, localPath: URL, startTime: Date, fromCommit: String?) async -> GitSyncResult {
+    private func pushOnly(project: SyncProject, localPath: URL, startTime: Date, fromCommit: String?) async -> AppSyncResult {
         // 先提交本地未保存的变更
         let statusClean: Bool
-        switch gitService.status(at: localPath) {
+        switch await gitService.status(at: localPath) {
         case .success(let status):
             statusClean = status.isClean
         case .failure:
@@ -130,7 +124,7 @@ final class SyncEngine {
         }
         if !statusClean {
             let commitMessage = String(localized: "自动同步提交 - \(Self.dateFormatter.string(from: Date()))")
-            let commitResult = gitService.commitAll(at: localPath, message: commitMessage)
+            let commitResult = await gitService.commitAll(at: localPath, message: commitMessage)
             if case .failure(let error) = commitResult {
                 let msg = String(localized: "提交本地变更失败: \(error.localizedDescription)")
                 await recordSync(project: project, action: .push, result: .failure,
@@ -140,9 +134,9 @@ final class SyncEngine {
             }
         }
 
-        switch gitService.push(at: localPath, branch: project.branch) {
+        switch await gitService.push(at: localPath, branch: project.branch) {
         case .success(let output):
-            let toCommit = gitService.commitHash(at: localPath)
+            let toCommit = await gitService.commitHash(at: localPath)
             await recordSync(project: project, action: .push, result: .success,
                       message: String(localized: "推送成功"), startTime: startTime,
                       fromCommit: fromCommit, toCommit: toCommit)
@@ -157,10 +151,10 @@ final class SyncEngine {
     }
 
     /// 双方都有变更时的同步策略：先 commit 本地，再 rebase 到远端，最后 push
-    private func syncWithRebase(project: SyncProject, localPath: URL, startTime: Date, fromCommit: String?) async -> GitSyncResult {
+    private func syncWithRebase(project: SyncProject, localPath: URL, startTime: Date, fromCommit: String?) async -> AppSyncResult {
         // 1. 先提交本地所有变更
         let syncStatus: GitStatus?
-        switch gitService.status(at: localPath) {
+        switch await gitService.status(at: localPath) {
         case .success(let s):
             syncStatus = s
         case .failure:
@@ -168,7 +162,7 @@ final class SyncEngine {
         }
         if let s = syncStatus, !s.isClean {
             let commitMessage = String(localized: "自动同步提交 - \(Self.dateFormatter.string(from: Date()))")
-            let commitResult = gitService.commitAll(at: localPath, message: commitMessage)
+            let commitResult = await gitService.commitAll(at: localPath, message: commitMessage)
             if case .failure(let error) = commitResult {
                 let msg = String(localized: "提交本地变更失败: \(error.localizedDescription)")
                 await recordSync(project: project, action: .sync, result: .failure,
@@ -180,12 +174,12 @@ final class SyncEngine {
 
         // 2. 尝试 rebase 到远端分支
         let remoteRef = "origin/\(project.branch)"
-        switch gitService.rebase(at: localPath, onto: remoteRef) {
+        switch await gitService.rebase(at: localPath, onto: remoteRef) {
         case .success:
             // rebase 成功，现在推送
-            switch gitService.push(at: localPath, branch: project.branch) {
+            switch await gitService.push(at: localPath, branch: project.branch) {
             case .success(let output):
-                let toCommit = gitService.commitHash(at: localPath)
+                let toCommit = await gitService.commitHash(at: localPath)
                 await recordSync(project: project, action: .sync, result: .success,
                           message: String(localized: "Rebase 并推送成功"), startTime: startTime,
                           fromCommit: fromCommit, toCommit: toCommit)
@@ -213,8 +207,8 @@ final class SyncEngine {
     // MARK: - 辅助方法
 
     /// 获取指定路径的 commit hash（公开给外部使用）
-    func getCommitHash(at path: URL) -> String? {
-        gitService.commitHash(at: path)
+    func getCommitHash(at path: URL) async -> String? {
+        await gitService.commitHash(at: path)
     }
 
     /// 记录同步历史到 SyncHistoryStore（异步，确保在 MainActor 上执行）

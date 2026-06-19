@@ -4,6 +4,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import os
 
 /// 同步历史记录存储管理器
 @MainActor
@@ -13,6 +14,9 @@ class SyncHistoryStore: ObservableObject {
 
     /// 存储文件路径
     private let storageURL: URL
+
+    /// 最近一次已知的 entries 快照，用于 nonisolated deinit 中安全写入
+    nonisolated(unsafe) private var lastKnownEntries: [SyncHistoryEntry] = []
 
     /// 历史记录保留的最大数量（从 UserDefaults 读取，默认 1000）
     private var maxEntries: Int {
@@ -54,8 +58,16 @@ class SyncHistoryStore: ObservableObject {
     /// 非隔离的同步写入方法（仅在 deinit 中使用）
     /// 使用 lastKnownEntries 快照避免访问 @MainActor 隔离的 entries
     nonisolated private func flushSync() {
-        // 无法在 deinit 中安全访问 @MainActor 属性，跳过写入
-        // 数据已通过 debounce 机制定期保存，丢失概率极低
+        // 使用快照数据直接序列化写入，无需访问 @MainActor 隔离属性
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(lastKnownEntries)
+            try data.write(to: storageURL, options: .atomic)
+        } catch {
+            Log.storage.error("flushSync 写入失败: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - 持久化操作
@@ -64,17 +76,19 @@ class SyncHistoryStore: ObservableObject {
     func loadEntries() {
         guard FileManager.default.fileExists(atPath: storageURL.path) else {
             entries = []
+            lastKnownEntries = []
             return
         }
-
         do {
             let data = try Data(contentsOf: storageURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             entries = try decoder.decode([SyncHistoryEntry].self, from: data)
+            lastKnownEntries = entries
         } catch {
-            print("[SyncHistoryStore] 加载同步历史失败: \(error.localizedDescription)")
+            Log.storage.error("加载同步历史失败: \(error.localizedDescription)")
             entries = []
+            lastKnownEntries = []
         }
     }
 
@@ -98,6 +112,8 @@ class SyncHistoryStore: ObservableObject {
 
     /// 保存历史记录到磁盘（内部方法）
     private func saveEntries() {
+        // 更新快照，供 deinit 中的 flushSync() 使用
+        lastKnownEntries = entries
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -105,7 +121,7 @@ class SyncHistoryStore: ObservableObject {
             let data = try encoder.encode(entries)
             try data.write(to: storageURL, options: .atomic)
         } catch {
-            print("[SyncHistoryStore] 保存同步历史失败: \(error.localizedDescription)")
+            Log.storage.error("保存同步历史失败: \(error.localizedDescription)")
         }
     }
 

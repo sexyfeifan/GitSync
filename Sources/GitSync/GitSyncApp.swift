@@ -14,6 +14,9 @@ struct GitSyncApp: App {
     /// 自动同步服务（延迟初始化，依赖其他 StateObject）
     @State private var autoSyncService: AutoSyncService?
 
+    /// 场景生命周期阶段，用于监听应用退出
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
         // 菜单栏常驻图标，macOS 13+ MenuBarExtra
         MenuBarExtra {
@@ -37,6 +40,13 @@ struct GitSyncApp: App {
         }
         .onAppear {
             setupAutoSyncService()
+        }
+        .onChange(of: scenePhase) { newPhase in
+            // 应用进入非活跃状态时，强制刷写所有待保存数据到磁盘
+            if newPhase == .inactive || newPhase == .background {
+                projectStore.flush()
+                historyStore.flush()
+            }
         }
     }
 

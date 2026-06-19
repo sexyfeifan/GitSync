@@ -73,8 +73,12 @@ enum AppConstants {
     static let keychainServiceName = "com.gitsync.github.token"
     /// Keychain 账户名
     static let keychainAccountName = "default"
-    /// HTTP User-Agent
-    static let userAgent = "GitSync/1.0"
+    /// HTTP User-Agent（从 Bundle.main 获取版本号）
+    static let userAgent: String = {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "GitSync/\(version) (\(build))"
+    }()
 
     // MARK: - 文件路径
 

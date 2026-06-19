@@ -10,7 +10,7 @@ protocol SyncEngineProtocol {
     func syncProject(_ project: SyncProject) async -> AppSyncResult
 
     /// 获取指定路径的 commit hash
-    func getCommitHash(at path: URL) -> String?
+    func getCommitHash(at path: URL) async -> String?
 }
 
 /// 让 SyncEngine 遵循协议

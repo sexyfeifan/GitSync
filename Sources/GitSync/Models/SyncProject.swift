@@ -49,7 +49,7 @@ struct SyncProject: Codable, Identifiable, Equatable {
     /// 相对时间格式化器（静态缓存，避免每次调用都创建新实例）
     private static let relativeDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = Locale.autoupdatingCurrent
         formatter.unitsStyle = .short
         return formatter
     }()

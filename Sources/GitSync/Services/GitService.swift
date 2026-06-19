@@ -57,6 +57,7 @@ struct GitStatus {
 // MARK: - Git 服务
 
 /// Git CLI 封装，通过 Process 执行 git 命令
+/// 所有操作均为 async，走带超时保护的异步路径
 /// 已标记 Sendable，所有可变状态在 init 后不再变化
 final class GitService: Sendable {
     /// 共享实例，避免每次调用都创建新对象
@@ -82,7 +83,7 @@ final class GitService: Sendable {
     ///   - url: 远程仓库 URL（HTTPS 或 SSH）
     ///   - to: 本地目标路径
     /// - Returns: 操作结果
-    func clone(url: String, to: URL) -> Result<Void, GitError> {
+    func clone(url: String, to: URL) async -> Result<Void, GitError> {
         // 克隆前检查目标路径是否已存在，避免覆盖已有仓库
         if FileManager.default.fileExists(atPath: to.path) {
             return .failure(.cloneFailed(url: url, reason: "目标路径已存在: \(to.path)"))
@@ -98,16 +99,15 @@ final class GitService: Sendable {
             }
         }
 
-        do {
-            _ = try runGit(args: ["clone", url, to.path], in: parentDir)
+        // 克隆操作使用更长的超时时间（120 秒）
+        switch await executeGit(args: ["clone", url, to.path], in: parentDir, timeoutSeconds: 120) {
+        case .success:
             return .success(())
-        } catch let error as GitError {
+        case .failure(let error):
             if case .commandFailed = error {
                 return .failure(.cloneFailed(url: url, reason: error.localizedDescription))
             }
             return .failure(error)
-        } catch {
-            return .failure(.cloneFailed(url: url, reason: error.localizedDescription))
         }
     }
 
@@ -116,12 +116,12 @@ final class GitService: Sendable {
     ///   - at: 本地仓库路径
     ///   - branch: 要拉取的分支名（默认当前分支）
     /// - Returns: 命令输出或错误
-    func pull(at path: URL, branch: String? = nil) -> Result<String, GitError> {
+    func pull(at path: URL, branch: String? = nil) async -> Result<String, GitError> {
         var args = ["pull", "--rebase"]
         if let branch = branch {
             args.append(contentsOf: ["origin", branch])
         }
-        return executeGit(args: args, in: path)
+        return await executeGit(args: args, in: path)
     }
 
     /// 推送本地提交到远程
@@ -129,19 +129,19 @@ final class GitService: Sendable {
     ///   - at: 本地仓库路径
     ///   - branch: 要推送的分支名（默认当前分支）
     /// - Returns: 命令输出或错误
-    func push(at path: URL, branch: String? = nil) -> Result<String, GitError> {
+    func push(at path: URL, branch: String? = nil) async -> Result<String, GitError> {
         var args = ["push"]
         if let branch = branch {
             args.append(contentsOf: ["origin", branch])
         }
-        return executeGit(args: args, in: path)
+        return await executeGit(args: args, in: path)
     }
 
     /// 从远程获取最新引用（不合并）
     /// - Parameter at: 本地仓库路径
     /// - Returns: 操作结果
-    func fetch(at path: URL) -> Result<Void, GitError> {
-        switch executeGit(args: ["fetch", "origin"], in: path) {
+    func fetch(at path: URL) async -> Result<Void, GitError> {
+        switch await executeGit(args: ["fetch", "origin"], in: path) {
         case .success:
             return .success(())
         case .failure(let error):
@@ -152,12 +152,12 @@ final class GitService: Sendable {
     // MARK: - 状态查询
 
     /// 获取工作区状态，失败时返回错误而非静默返回空状态
-    func status(at path: URL) -> Result<GitStatus, GitError> {
+    func status(at path: URL) async -> Result<GitStatus, GitError> {
         guard FileManager.default.fileExists(atPath: path.path) else {
             return .failure(.pathNotFound(path: path.path))
         }
 
-        let result = executeGit(args: ["status", "--porcelain=v1"], in: path)
+        let result = await executeGit(args: ["status", "--porcelain=v1"], in: path)
 
         switch result {
         case .success(let output):
@@ -170,8 +170,8 @@ final class GitService: Sendable {
     /// 获取当前分支名
     /// - Parameter at: 本地仓库路径
     /// - Returns: 分支名，失败时返回 nil
-    func currentBranch(at path: URL) -> String? {
-        let result = executeGit(args: ["rev-parse", "--abbrev-ref", "HEAD"], in: path)
+    func currentBranch(at path: URL) async -> String? {
+        let result = await executeGit(args: ["rev-parse", "--abbrev-ref", "HEAD"], in: path)
         switch result {
         case .success(let output):
             let branch = output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -186,22 +186,22 @@ final class GitService: Sendable {
     /// 检测是否有远端变更（比较本地 HEAD 和远端 HEAD）
     /// - Parameter localPath: 本地仓库路径
     /// - Returns: true 表示远端有新提交
-    func hasRemoteChanges(localPath: URL) -> Bool {
+    func hasRemoteChanges(localPath: URL) async -> Bool {
         // 先 fetch 最新引用
-        guard case .success = fetch(at: localPath) else {
+        guard case .success = await fetch(at: localPath) else {
             return false
         }
 
         // 获取本地 HEAD 的 commit hash
-        guard let localHead = commitHash(at: localPath, ref: "HEAD") else {
+        guard let localHead = await commitHash(at: localPath, ref: "HEAD") else {
             return false
         }
 
         // 获取远端跟踪分支的 commit hash
-        guard let branch = currentBranch(at: localPath) else {
+        guard let branch = await currentBranch(at: localPath) else {
             return false
         }
-        guard let remoteHead = commitHash(at: localPath, ref: "origin/\(branch)") else {
+        guard let remoteHead = await commitHash(at: localPath, ref: "origin/\(branch)") else {
             return false
         }
 
@@ -212,10 +212,10 @@ final class GitService: Sendable {
     /// 检测是否有本地未提交或未推送的变更
     /// - Parameter localPath: 本地仓库路径
     /// - Returns: true 表示有本地变更
-    func hasLocalChanges(localPath: URL) -> Bool {
+    func hasLocalChanges(localPath: URL) async -> Bool {
         // 检查工作区是否有未提交的变更
         let currentStatus: GitStatus
-        switch status(at: localPath) {
+        switch await status(at: localPath) {
         case .success(let s):
             currentStatus = s
         case .failure:
@@ -226,11 +226,11 @@ final class GitService: Sendable {
         }
 
         // 检查是否有未推送的提交
-        guard let branch = currentBranch(at: localPath) else {
+        guard let branch = await currentBranch(at: localPath) else {
             return false
         }
 
-        let result = executeGit(
+        let result = await executeGit(
             args: ["log", "origin/\(branch)..HEAD", "--oneline"],
             in: localPath
         )
@@ -250,12 +250,12 @@ final class GitService: Sendable {
     ///   - at: 本地仓库路径
     ///   - message: 提交信息
     /// - Returns: 提交信息或错误
-    func commitAll(at path: URL, message: String) -> Result<String, GitError> {
+    func commitAll(at path: URL, message: String) async -> Result<String, GitError> {
         // 确保存在 .gitignore 并排除常见无关文件
         ensureGitignore(at: path)
 
         // 先暂存所有变更
-        switch executeGit(args: ["add", "-A"], in: path) {
+        switch await executeGit(args: ["add", "-A"], in: path) {
         case .failure(let error):
             return .failure(error)
         case .success:
@@ -263,7 +263,7 @@ final class GitService: Sendable {
         }
 
         // 执行提交
-        return executeGit(args: ["commit", "-m", message], in: path)
+        return await executeGit(args: ["commit", "-m", message], in: path)
     }
 
     /// 执行 rebase 操作
@@ -271,14 +271,14 @@ final class GitService: Sendable {
     ///   - at: 本地仓库路径
     ///   - onto: 目标分支或 commit
     /// - Returns: 命令输出或错误
-    func rebase(at path: URL, onto: String) -> Result<String, GitError> {
-        let result = executeGit(args: ["rebase", onto], in: path)
+    func rebase(at path: URL, onto: String) async -> Result<String, GitError> {
+        let result = await executeGit(args: ["rebase", onto], in: path)
         switch result {
         case .failure:
             // 只有确认存在冲突标记时才 abort，避免误中止其他失败原因
             let conflictMarkers = ["CONFLICT", "conflict", "could not apply", "Failed to merge"]
             // 检查 git status 输出中是否有冲突指示
-            let statusResult = executeGit(args: ["status"], in: path)
+            let statusResult = await executeGit(args: ["status"], in: path)
             let hasConflict: Bool
             switch statusResult {
             case .success(let output):
@@ -287,7 +287,7 @@ final class GitService: Sendable {
                 hasConflict = false
             }
             if hasConflict {
-                _ = executeGit(args: ["rebase", "--abort"], in: path)
+                _ = await executeGit(args: ["rebase", "--abort"], in: path)
             }
             return result
         case .success:
@@ -298,8 +298,8 @@ final class GitService: Sendable {
     /// 检测仓库是否存在合并冲突
     /// - Parameter at: 本地仓库路径
     /// - Returns: true 表示有冲突
-    func detectConflict(at path: URL) -> Bool {
-        switch status(at: path) {
+    func detectConflict(at path: URL) async -> Bool {
+        switch await status(at: path) {
         case .success(let currentStatus):
             return currentStatus.hasConflicts
         case .failure:
@@ -314,8 +314,8 @@ final class GitService: Sendable {
     ///   - at: 本地仓库路径
     ///   - ref: Git 引用（如 HEAD、origin/main 等）
     /// - Returns: commit hash 字符串，失败返回 nil
-    func commitHash(at path: URL, ref: String = "HEAD") -> String? {
-        let result = executeGit(args: ["rev-parse", ref], in: path)
+    func commitHash(at path: URL, ref: String = "HEAD") async -> String? {
+        let result = await executeGit(args: ["rev-parse", ref], in: path)
         switch result {
         case .success(let output):
             let hash = output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -403,13 +403,8 @@ final class GitService: Sendable {
         return env
     }
 
-    /// 执行 git 命令并返回输出（同步版本，用于兼容现有调用链）
-    /// 使用临时文件捕获 stdout/stderr，避免内存管道缓冲问题
-    private func runGit(args: [String], in cwd: URL) throws -> (stdout: String, stderr: String) {
-        try runGitBlocking(args: args, in: cwd)
-    }
-
-    /// 异步执行 git 命令，带超时保护（普通命令 30 秒，clone 120 秒）
+    /// 异步执行 git 命令，带超时保护（普通命令 30 秒，clone 等可传更长超时）
+    /// 这是唯一的 git 命令执行入口，所有操作都走此路径
     private func runGitAsync(args: [String], in cwd: URL, timeoutSeconds: TimeInterval = 30) async throws -> (stdout: String, stderr: String) {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -515,66 +510,15 @@ final class GitService: Sendable {
         }
     }
 
-    /// 实际执行 git 命令的阻塞实现（供同步和异步版本共用）
-    private func runGitBlocking(args: [String], in cwd: URL) throws -> (stdout: String, stderr: String) {
-        let process = Process()
-        let fm = FileManager.default
-        process.currentDirectoryURL = cwd
-        process.environment = enrichedEnvironment(for: cwd)
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git"] + args
-
-        // 使用临时文件捕获输出（参考 NookDesk ProcessRunner 模式）
-        let tempRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        let stdoutURL = tempRoot.appendingPathComponent("gitsync-\(UUID().uuidString)-stdout.log")
-        let stderrURL = tempRoot.appendingPathComponent("gitsync-\(UUID().uuidString)-stderr.log")
-
-        fm.createFile(atPath: stdoutURL.path, contents: Data())
-        fm.createFile(atPath: stderrURL.path, contents: Data())
-        let stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
-        let stderrHandle = try FileHandle(forWritingTo: stderrURL)
-
-        defer {
-            try? stdoutHandle.close()
-            try? stderrHandle.close()
-            try? fm.removeItem(at: stdoutURL)
-            try? fm.removeItem(at: stderrURL)
-        }
-
-        process.standardOutput = stdoutHandle
-        process.standardError = stderrHandle
-
-        try process.run()
-        process.waitUntilExit()
-
-        try stdoutHandle.synchronize()
-        try stderrHandle.synchronize()
-
-        let stdoutData = try Data(contentsOf: stdoutURL)
-        let stderrData = try Data(contentsOf: stderrURL)
-        let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        if process.terminationStatus != 0 {
-            let commandLine = (["git"] + args).joined(separator: " ")
-            throw GitError.commandFailed(
-                command: commandLine,
-                code: process.terminationStatus,
-                output: [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
-            )
-        }
-
-        return (stdout, stderr)
-    }
-
-    /// 统一执行 git 命令并返回 Result
-    private func executeGit(args: [String], in path: URL) -> Result<String, GitError> {
+    /// 统一执行 git 命令并返回 Result（异步，带超时保护）
+    /// 所有 git 操作都通过此方法执行
+    private func executeGit(args: [String], in path: URL, timeoutSeconds: TimeInterval = 30) async -> Result<String, GitError> {
         guard FileManager.default.fileExists(atPath: path.path) else {
             return .failure(.pathNotFound(path: path.path))
         }
 
         do {
-            let result = try runGit(args: args, in: path)
+            let result = try await runGitAsync(args: args, in: path, timeoutSeconds: timeoutSeconds)
             return .success(result.stdout)
         } catch let error as GitError {
             return .failure(error)

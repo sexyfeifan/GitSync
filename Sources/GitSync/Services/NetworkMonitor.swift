@@ -28,7 +28,8 @@ class NetworkMonitor: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     /// 网络状态变化回调（供 AutoSyncService 使用）
-    var onNetworkStatusChanged: ((Bool) -> Void)?
+    /// 标记 @Sendable 确保闭包在并发上下文中安全传递
+    var onNetworkStatusChanged: (@Sendable (Bool) -> Void)?
 
     init() {
         startMonitoring()

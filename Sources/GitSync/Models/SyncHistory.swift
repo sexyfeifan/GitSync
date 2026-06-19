@@ -138,7 +138,7 @@ struct SyncHistoryEntry: Codable, Identifiable {
     /// 缓存的日期格式化器（避免每次创建新实例）
     private static let cachedDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = Locale.autoupdatingCurrent
         formatter.dateStyle = .medium
         formatter.timeStyle = .medium
         return formatter

@@ -9,7 +9,7 @@ enum AppError: LocalizedError {
     /// Git 操作错误
     case git(GitError)
     /// GitHub API 错误
-    case github(GitError)
+    case github(GitHubServiceError)
     /// 通用错误（携带消息）
     case generic(String)
     /// 本地目录不存在
