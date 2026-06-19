@@ -8,11 +8,13 @@ enum AppConstants {
     // MARK: - UI 尺寸
 
     /// 菜单栏弹出窗口宽度
-    static let menuBarWidth: CGFloat = 320
+    static let menuBarWidth: CGFloat = 360
     /// 项目列表最大高度
-    static let projectListMaxHeight: CGFloat = 400
+    static let projectListMaxHeight: CGFloat = 500
     /// 空项目列表最小高度
-    static let emptyListMinHeight: CGFloat = 120
+    static let emptyListMinHeight: CGFloat = 160
+    /// 菜单栏弹出窗口最小高度
+    static let menuBarMinHeight: CGFloat = 300
     /// 设置窗口宽度
     static let settingsWidth: CGFloat = 500
     /// 设置窗口高度

@@ -111,21 +111,23 @@ struct MenuBarView: View {
             Divider()
 
             // 底部操作栏
-            HStack {
+            HStack(spacing: 6) {
                 // 网络状态指示
                 if !networkMonitor.isConnected {
                     Image(systemName: networkMonitor.iconName)
                         .foregroundColor(.red)
+                        .font(.caption)
                         .help(networkMonitor.statusDescription)
                         .accessibilityLabel(networkMonitor.statusDescription)
                 }
 
                 // 同步/取消按钮（根据状态切换）
                 if isSyncingAll {
-                    Button(String(localized: "取消同步")) {
+                    Button(String(localized: "取消")) {
                         syncAllTask?.cancel()
                         syncAllTask = nil
                     }
+                    .controlSize(.small)
                     .keyboardShortcut("s", modifiers: .command)
                     .accessibilityLabel(String(localized: "取消同步"))
                 } else {
@@ -134,36 +136,51 @@ struct MenuBarView: View {
                             await performSyncAll()
                         }
                     }
+                    .controlSize(.small)
                     .disabled(projectStore.projects.isEmpty || !networkMonitor.isConnected)
                     .keyboardShortcut("s", modifiers: .command)
                     .accessibilityLabel(String(localized: "同步全部项目"))
-                    .accessibilityHint(String(localized: "开始同步所有已添加的 Git 仓库"))
                 }
 
                 Spacer()
 
-                Button(String(localized: "设置")) {
+                Button {
                     openWindow(id: "settings")
+                } label: {
+                    Image(systemName: "gear")
                 }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
                 .keyboardShortcut(",", modifiers: .command)
-                .accessibilityLabel(String(localized: "打开设置"))
+                .accessibilityLabel(String(localized: "设置"))
 
-                Button(String(localized: "退出")) {
+                Button {
                     NSApplication.shared.terminate(nil)
+                } label: {
+                    Image(systemName: "power")
                 }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
                 .keyboardShortcut("q", modifiers: .command)
-                .accessibilityLabel(String(localized: "退出 GitSync"))
+                .accessibilityLabel(String(localized: "退出"))
 
-                Button(String(localized: "强制退出")) {
+                Button {
                     Darwin.exit(0)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.red)
                 }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
                 .keyboardShortcut("q", modifiers: [.command, .shift])
-                .accessibilityLabel(String(localized: "强制退出 GitSync"))
-                .help(String(localized: "立即终止进程（忽略未保存数据）"))
+                .accessibilityLabel(String(localized: "强制退出"))
+                .help(String(localized: "立即终止进程（⌘⇧Q）"))
             }
-            .padding(8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
         }
         .frame(width: AppConstants.menuBarWidth)
+        .frame(minHeight: AppConstants.menuBarMinHeight)
         // MARK: - 删除确认弹窗
         .alert(String(localized: "删除项目"), isPresented: $showDeleteAlert) {
             Button(String(localized: "取消"), role: .cancel) {

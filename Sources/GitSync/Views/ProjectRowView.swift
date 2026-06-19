@@ -15,67 +15,69 @@ struct ProjectRowView: View {
     @State private var isSyncing = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            // 同步状态图标（形状+颜色区分，对色盲友好）
+        HStack(spacing: 8) {
+            // 同步状态图标
             Image(systemName: project.syncStatus.iconName)
                 .foregroundColor(project.syncStatus.color)
-                .frame(width: 20)
+                .font(.body)
+                .frame(width: 16)
                 .accessibilityLabel(project.syncStatus.accessibilityDescription)
 
             // 项目信息
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
                     Text(project.name)
-                        .font(.system(.body, weight: .medium))
+                        .font(.system(.callout, weight: .medium))
+                        .lineLimit(1)
                     if project.isOwnRepo {
                         Image(systemName: "person.fill")
-                            .font(.caption2)
+                            .font(.system(size: 8))
                             .foregroundColor(.blue)
-                            .accessibilityLabel(String(localized: "自己的仓库"))
                     }
                     if project.forkedFrom != nil {
                         Image(systemName: "tuningfork")
-                            .font(.caption2)
+                            .font(.system(size: 8))
                             .foregroundColor(.orange)
-                            .accessibilityLabel(String(localized: "Fork 仓库"))
                     }
                 }
-                Text(project.owner)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                if !project.lastSyncMessage.isEmpty {
-                    Text(project.lastSyncMessage)
+                HStack(spacing: 4) {
+                    Text(project.owner)
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                        .lineLimit(1)
+                    if !project.lastSyncMessage.isEmpty {
+                        Text("·")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text(project.lastSyncMessage)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
 
             Spacer()
 
             // 操作按钮
-            VStack(spacing: 4) {
-                if isSyncing {
-                    // 同步中显示旋转动画
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Button {
-                        Task {
-                            await syncSingleProject(project)
-                        }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+            if isSyncing {
+                ProgressView()
+                    .controlSize(.mini)
+            } else {
+                Button {
+                    Task {
+                        await syncSingleProject(project)
                     }
-                    .buttonStyle(.borderless)
-                    .help(String(localized: "同步此项目"))
-                    .accessibilityLabel(String(localized: "同步项目 \(project.name)"))
-                    .accessibilityHint(String(localized: "立即同步此 Git 仓库"))
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
                 }
+                .buttonStyle(.borderless)
+                .help(String(localized: "同步此项目"))
+                .accessibilityLabel(String(localized: "同步项目 \(project.name)"))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             // 双击打开本地目录
