@@ -1,5 +1,6 @@
 // SettingsProjectsTab.swift
 // 项目管理标签页：项目列表、添加项目、删除项目
+// v0.2.2 优化：showingAddProject 自管理，添加 isCloning loading 状态
 
 import SwiftUI
 
@@ -8,12 +9,13 @@ struct SettingsProjectsTab: View {
     /// 项目存储
     @EnvironmentObject var projectStore: ProjectStore
 
-    /// 是否显示添加项目面板
-    @Binding var showingAddProject: Bool
-    /// 删除确认弹窗状态
+    /// 删除确认弹窗状态（由父视图管理，因为 alert 需要绑定到父视图）
     @Binding var showDeleteAlert: Bool
     /// 待删除的项目
     @Binding var projectToDelete: SyncProject?
+
+    /// 是否显示添加项目面板（自管理，无需从父视图 @Binding 传递）
+    @State private var showingAddProject = false
 
     /// 新项目的远程 URL
     @State private var newProjectURL = ""
@@ -21,6 +23,8 @@ struct SettingsProjectsTab: View {
     @State private var addProjectError: String?
     /// 添加项目技术错误详情
     @State private var addProjectTechnicalError: String?
+    /// 是否正在克隆（loading 状态）
+    @State private var isCloning = false
 
     var body: some View {
         VStack {
@@ -91,6 +95,7 @@ struct SettingsProjectsTab: View {
                 .font(.headline)
             TextField(String(localized: "GitHub 仓库 URL（HTTPS 或 SSH）"), text: $newProjectURL)
                 .textFieldStyle(.roundedBorder)
+                .disabled(isCloning)
             if let error = addProjectError {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
@@ -110,21 +115,34 @@ struct SettingsProjectsTab: View {
                     }
                 }
             }
+            // 克隆进度指示
+            if isCloning {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(String(localized: "正在克隆仓库..."))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
             HStack {
                 Button(String(localized: "取消")) {
-                    newProjectURL = ""
-                    addProjectError = nil
-                    addProjectTechnicalError = nil
-                    showingAddProject = false
+                    if !isCloning {
+                        newProjectURL = ""
+                        addProjectError = nil
+                        addProjectTechnicalError = nil
+                        showingAddProject = false
+                    }
                 }
                 .keyboardShortcut(.cancelAction)
+                .disabled(isCloning)
                 Button(String(localized: "添加")) {
                     Task {
                         await addProjectFromURL()
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(newProjectURL.isEmpty)
+                .disabled(newProjectURL.isEmpty || isCloning)
             }
         }
         .padding()
@@ -133,7 +151,7 @@ struct SettingsProjectsTab: View {
 
     // MARK: - 添加项目逻辑
 
-    /// 从 URL 添加新项目
+    /// 从 URL 添加新项目（带 loading 状态）
     private func addProjectFromURL() async {
         addProjectError = nil
         addProjectTechnicalError = nil
@@ -153,10 +171,11 @@ struct SettingsProjectsTab: View {
             return
         }
 
-        // 克隆仓库
+        // 克隆仓库（显示 loading 状态）
+        isCloning = true
         let gitService = GitService.shared
-        // [BUGFIX-1] clone 是 async 方法，必须加 await，否则编译失败
         let cloneResult = await gitService.clone(url: newProjectURL, to: URL(fileURLWithPath: localPath))
+        isCloning = false
 
         switch cloneResult {
         case .success:

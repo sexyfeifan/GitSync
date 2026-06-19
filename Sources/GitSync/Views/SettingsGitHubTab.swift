@@ -1,25 +1,21 @@
 // SettingsGitHubTab.swift
 // GitHub 设置标签页：Token 配置、连接测试
+// v0.2.2 优化：连接测试状态自管理，移除 6 个 @Binding 依赖
 
 import SwiftUI
 
 /// GitHub 设置标签页内容
 struct SettingsGitHubTab: View {
     /// 应用设置（统一管理 @AppStorage）
-    @ObservedObject var settings: AppSettings
+    @ObservedObject private var settings = AppSettings.shared
 
-    /// 是否正在测试连接
-    @Binding var isTestingConnection: Bool
-    /// 测试连接结果消息
-    @Binding var testConnectionMessage: String?
-    /// 测试连接是否成功
-    @Binding var testConnectionSuccess: Bool
-    /// 测试连接返回的用户名
-    @Binding var testConnectionUsername: String?
-    /// 测试连接返回的头像 URL
-    @Binding var testConnectionAvatarURL: String?
-    /// 测试连接的技术错误详情
-    @Binding var testConnectionTechnicalError: String?
+    // MARK: - 测试连接状态（自管理，无需从父视图 @Binding 传递）
+    @State private var isTestingConnection = false
+    @State private var testConnectionMessage: String?
+    @State private var testConnectionSuccess = false
+    @State private var testConnectionUsername: String?
+    @State private var testConnectionAvatarURL: String?
+    @State private var testConnectionTechnicalError: String?
 
     var body: some View {
         Form {

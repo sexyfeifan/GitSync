@@ -53,8 +53,6 @@ enum AppConstants {
     static let defaultAutoSyncIntervalSeconds: TimeInterval = 300
     /// 防抖延迟（秒）
     static let debounceDelay: TimeInterval = 0.5
-    /// 防抖延迟（纳秒）
-    static let debounceDelayNanoseconds: UInt64 = 500_000_000
 
     // MARK: - 历史记录
 

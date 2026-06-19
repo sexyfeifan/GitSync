@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.2 (2026-06-19) — 一致性检查与死常量清理
+
+### 一致性修复
+- NotificationService 的 7 处 notification categoryIdentifier 改为引用 AppConstants 常量
+- ProjectStore/SyncHistoryStore 的目录名和文件名改为引用 AppConstants 常量
+- SyncHistoryStore.recentEntries 默认参数改用 AppConstants.recentHistoryCount
+- SettingsView 的高度参数改用 AppConstants.settingsHeight
+- GitHubService 的 Keychain accountName 改为引用 AppConstants.keychainAccountName
+- 消除所有"死常量"，所有 Constants.swift 中的常量均被实际使用
+
+### 文档更新
+- CHANGELOG.md 添加 v0.2.2 条目
+- README.md 项目结构补充 SyncEngineFactory.swift 和 Logger.swift
+
 ## v0.2.0 (2026-06-19) — 目标 8/10
 
 ### Architecture (5→8)

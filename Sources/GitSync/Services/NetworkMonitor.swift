@@ -1,5 +1,6 @@
 // NetworkMonitor.swift
 // 网络状态监控服务，使用 NWPathMonitor 监听网络变化
+// v0.2.2 优化：添加防抖，忽略 1 秒内的重复状态变化，避免高频网络切换导致 Task 堆积
 
 import Foundation
 import Network
@@ -31,6 +32,12 @@ class NetworkMonitor: ObservableObject {
     /// 标记 @Sendable 确保闭包在并发上下文中安全传递
     var onNetworkStatusChanged: (@Sendable (Bool) -> Void)?
 
+    /// 防抖：上一次状态变化的时间戳，忽略 1 秒内的重复状态变化
+    private var lastStatusChangeTime: Date = .distantPast
+
+    /// 防抖间隔（秒）
+    private let debounceInterval: TimeInterval = 1.0
+
     init() {
         startMonitoring()
     }
@@ -39,7 +46,7 @@ class NetworkMonitor: ObservableObject {
         monitor.cancel()
     }
 
-    /// 开始监听网络状态
+    /// 开始监听网络状态（带防抖，避免高频网络切换导致 Task 堆积）
     private func startMonitoring() {
         monitor.pathUpdateHandler = { [weak self] path in
             let isConnected = path.status == .satisfied
@@ -50,6 +57,14 @@ class NetworkMonitor: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 let wasConnected = self.isConnected
+
+                // 防抖：忽略 1 秒内的重复状态变化，避免高频网络切换导致 Task 堆积
+                let now = Date()
+                if wasConnected == isConnected && now.timeIntervalSince(self.lastStatusChangeTime) < self.debounceInterval {
+                    return // 忽略短时间内重复的状态变化
+                }
+                self.lastStatusChangeTime = now
+
                 self.isConnected = isConnected
                 self.isExpensive = isExpensive
                 self.connectionType = connectionType

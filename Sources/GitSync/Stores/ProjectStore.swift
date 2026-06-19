@@ -25,12 +25,12 @@ class ProjectStore: ObservableObject {
     init() {
         // 在 Application Support 目录下创建存储文件
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = appSupport.appendingPathComponent("GitSync", isDirectory: true)
+        let appDir = appSupport.appendingPathComponent(AppConstants.appSupportDirectoryName, isDirectory: true)
 
         // 确保目录存在
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
 
-        self.storageURL = appDir.appendingPathComponent("projects.json")
+        self.storageURL = appDir.appendingPathComponent(AppConstants.projectsFileName)
 
         // 加载已有数据
         loadProjects()
@@ -135,19 +135,18 @@ class ProjectStore: ObservableObject {
         try? fm.copyItem(at: storageURL, to: bak1)
     }
 
-    /// 清理超出 maxBackupCount 的旧备份文件
+    /// 清理超出 maxBackupCount 的旧备份文件（最多检查到 maxBackupCount + 10，避免无限循环）
     private func cleanOldBackups() {
         let fm = FileManager.default
         let dir = storageURL.deletingLastPathComponent()
         let baseName = storageURL.lastPathComponent
 
-        // 删除编号大于 maxBackupCount 的备份
-        for i in (maxBackupCount + 1)... {
+        // 添加合理上限：最多检查到 maxBackupCount + 10，避免无限循环
+        let upperBound = maxBackupCount + 10
+        for i in (maxBackupCount + 1)...upperBound {
             let bakFile = dir.appendingPathComponent("\(baseName).bak.\(i)")
             if fm.fileExists(atPath: bakFile.path) {
                 try? fm.removeItem(at: bakFile)
-            } else {
-                break // 不存在则无需继续
             }
         }
     }

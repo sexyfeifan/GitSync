@@ -70,7 +70,7 @@ class NotificationService: ObservableObject {
         content.subtitle = projectName
         content.body = message
         content.sound = .default
-        content.categoryIdentifier = "SYNC_COMPLETED"
+        content.categoryIdentifier = AppConstants.notificationCategorySyncCompleted
 
         sendNotification(content: content, identifier: "sync-completed-\(projectName)")
     }
@@ -86,7 +86,7 @@ class NotificationService: ObservableObject {
         content.title = String(localized: "批量同步完成")
         content.body = String(localized: "共 \(totalCount) 个项目，成功 \(successCount) 个，失败 \(failureCount) 个")
         content.sound = .default
-        content.categoryIdentifier = "BATCH_SYNC"
+        content.categoryIdentifier = AppConstants.notificationCategoryBatchSync
 
         if failureCount > 0 {
             content.title = String(localized: "批量同步完成（有失败）")
@@ -106,7 +106,7 @@ class NotificationService: ObservableObject {
         content.subtitle = projectName
         content.body = String(localized: "远程仓库有 \(updateCount) 个新提交，可拉取更新")
         content.sound = .default
-        content.categoryIdentifier = "HAS_UPDATE"
+        content.categoryIdentifier = AppConstants.notificationCategoryHasUpdate
 
         sendNotification(content: content, identifier: "has-update-\(projectName)")
     }
@@ -121,7 +121,7 @@ class NotificationService: ObservableObject {
         content.subtitle = projectName
         content.body = String(localized: "检测到 \(conflictFiles.count) 个冲突文件：\(conflictFiles.prefix(3).joined(separator: "、"))")
         content.sound = .default
-        content.categoryIdentifier = "CONFLICT"
+        content.categoryIdentifier = AppConstants.notificationCategoryConflict
 
         sendNotification(content: content, identifier: "conflict-\(projectName)")
     }
@@ -138,7 +138,7 @@ class NotificationService: ObservableObject {
         }
         content.body = errorMessage
         content.sound = .default
-        content.categoryIdentifier = "ERROR"
+        content.categoryIdentifier = AppConstants.notificationCategoryError
 
         sendNotification(content: content, identifier: "error-\(projectName ?? "global")")
     }
@@ -152,7 +152,7 @@ class NotificationService: ObservableObject {
         content.title = String(localized: "网络已断开")
         content.body = String(localized: "自动同步已暂停，网络恢复后将自动继续")
         content.sound = .default
-        content.categoryIdentifier = "NETWORK"
+        content.categoryIdentifier = AppConstants.notificationCategoryNetwork
 
         sendNotification(content: content, identifier: "network-disconnected")
     }
@@ -166,7 +166,7 @@ class NotificationService: ObservableObject {
         content.title = String(localized: "网络已恢复")
         content.body = String(localized: "自动同步已恢复")
         content.sound = .default
-        content.categoryIdentifier = "NETWORK"
+        content.categoryIdentifier = AppConstants.notificationCategoryNetwork
 
         sendNotification(content: content, identifier: "network-restored")
     }

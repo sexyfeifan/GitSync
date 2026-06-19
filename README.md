@@ -147,7 +147,10 @@ GitSync/
 │   ├── Views/                          # SwiftUI 视图层
 │   │   ├── MenuBarView.swift           # 菜单栏主视图
 │   │   ├── ProjectRowView.swift        # 项目行视图
-│   │   └── SettingsView.swift          # 设置面板
+│   │   ├── SettingsView.swift          # 设置面板（协调标签页）
+│   │   ├── SettingsGeneralTab.swift    # 通用设置标签页
+│   │   ├── SettingsGitHubTab.swift     # GitHub 设置标签页
+│   │   └── SettingsProjectsTab.swift   # 项目管理标签页
 │   ├── Protocols/                      # 协议抽象层（便于测试）
 │   │   ├── GitServiceProtocol.swift    # Git 服务协议
 │   │   ├── SyncEngineProtocol.swift    # 同步引擎协议
@@ -155,11 +158,13 @@ GitSync/
 │   ├── Services/
 │   │   ├── GitService.swift            # Git CLI 封装
 │   │   ├── SyncEngine.swift            # 同步引擎（策略决策）
+│   │   ├── SyncEngineFactory.swift     # SyncEngine 共享实例工厂
 │   │   ├── SyncResultHandler.swift     # 统一同步结果处理
 │   │   ├── GitHubService.swift         # GitHub API 服务
 │   │   ├── AutoSyncService.swift       # 自动同步定时服务
 │   │   ├── NotificationService.swift   # 系统通知服务
-│   │   └── NetworkMonitor.swift        # 网络状态监控
+│   │   ├── NetworkMonitor.swift        # 网络状态监控
+│   │   └── Logger.swift                # 统一日志服务（os.Logger）
 │   └── Stores/
 │       ├── ProjectStore.swift          # 项目持久化存储
 │       ├── SyncHistoryStore.swift      # 同步历史存储

@@ -1,5 +1,6 @@
 // ProjectRowView.swift
 // 项目行视图，显示单个项目的同步状态和操作按钮
+// v0.2.2 优化：同步按钮添加 isSyncing loading 状态
 
 import SwiftUI
 
@@ -9,6 +10,9 @@ struct ProjectRowView: View {
     let onDeleteRequested: (SyncProject) -> Void
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var historyStore: SyncHistoryStore
+
+    /// 是否正在同步（loading 状态）
+    @State private var isSyncing = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -51,17 +55,23 @@ struct ProjectRowView: View {
 
             // 操作按钮
             VStack(spacing: 4) {
-                Button {
-                    Task {
-                        await syncSingleProject(project)
+                if isSyncing {
+                    // 同步中显示旋转动画
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Button {
+                        Task {
+                            await syncSingleProject(project)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
                     }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
+                    .buttonStyle(.borderless)
+                    .help(String(localized: "同步此项目"))
+                    .accessibilityLabel(String(localized: "同步项目 \(project.name)"))
+                    .accessibilityHint(String(localized: "立即同步此 Git 仓库"))
                 }
-                .buttonStyle(.borderless)
-                .help(String(localized: "同步此项目"))
-                .accessibilityLabel(String(localized: "同步项目 \(project.name)"))
-                .accessibilityHint(String(localized: "立即同步此 Git 仓库"))
             }
         }
         .padding(.horizontal, 12)
@@ -92,11 +102,14 @@ struct ProjectRowView: View {
 
     /// 同步单个项目（通过 SyncResultHandler 统一处理，使用共享 SyncEngine）
     private func syncSingleProject(_ project: SyncProject) async {
+        guard !isSyncing else { return } // 防止重复点击
+        isSyncing = true
         let syncEngine = SyncEngineFactory.shared(historyStore: historyStore)
         let handler = SyncResultHandler(
             syncEngine: syncEngine,
             projectStore: projectStore
         )
         _ = await handler.syncSingleProject(project)
+        isSyncing = false
     }
 }

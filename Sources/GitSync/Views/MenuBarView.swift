@@ -1,5 +1,6 @@
 // MenuBarView.swift
 // 菜单栏主视图，显示项目列表和底部操作栏
+// v0.2.2 优化：performSyncAll 添加取消机制
 
 import SwiftUI
 
@@ -38,6 +39,8 @@ struct MenuBarView: View {
     @State private var currentSyncingProject: String?
     /// 是否正在批量同步
     @State private var isSyncingAll = false
+    /// 批量同步的 Task 引用（支持取消）
+    @State private var syncAllTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -116,15 +119,25 @@ struct MenuBarView: View {
                         .accessibilityLabel(networkMonitor.statusDescription)
                 }
 
-                Button(String(localized: "全部同步")) {
-                    Task {
-                        await performSyncAll()
+                // 同步/取消按钮（根据状态切换）
+                if isSyncingAll {
+                    Button(String(localized: "取消同步")) {
+                        syncAllTask?.cancel()
+                        syncAllTask = nil
                     }
+                    .keyboardShortcut("s", modifiers: .command)
+                    .accessibilityLabel(String(localized: "取消同步"))
+                } else {
+                    Button(String(localized: "全部同步")) {
+                        syncAllTask = Task {
+                            await performSyncAll()
+                        }
+                    }
+                    .disabled(projectStore.projects.isEmpty || !networkMonitor.isConnected)
+                    .keyboardShortcut("s", modifiers: .command)
+                    .accessibilityLabel(String(localized: "同步全部项目"))
+                    .accessibilityHint(String(localized: "开始同步所有已添加的 Git 仓库"))
                 }
-                .disabled(projectStore.projects.isEmpty || !networkMonitor.isConnected || isSyncingAll)
-                .keyboardShortcut("s", modifiers: .command)
-                .accessibilityLabel(String(localized: "同步全部项目"))
-                .accessibilityHint(String(localized: "开始同步所有已添加的 Git 仓库"))
 
                 Spacer()
 
@@ -200,7 +213,7 @@ struct MenuBarView: View {
         projectStore.filterProjects(searchText: searchText)
     }
 
-    /// 同步所有项目（带进度指示，通过 SyncResultHandler 统一处理）
+    /// 同步所有项目（带进度指示和取消支持，通过 SyncResultHandler 统一处理）
     private func performSyncAll() async {
         isSyncingAll = true
         currentSyncingProject = nil
@@ -212,21 +225,26 @@ struct MenuBarView: View {
             projectStore: projectStore
         )
         for project in projectStore.projects {
+            // 检查取消：如果 Task 被取消，立即退出
+            if Task.isCancelled { break }
             currentSyncingProject = project.name
             _ = await handler.syncSingleProject(project)
         }
 
         currentSyncingProject = nil
         isSyncingAll = false
+        syncAllTask = nil
     }
 
     /// 启动撤销计时器（5秒后自动清除撤销状态）
     private func startUndoTimer() {
         undoTimer?.invalidate()
+        // 统一 Timer/Task 桥接模式：使用 Task { @MainActor [weak self] in }
         undoTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in
-            Task { @MainActor in
-                lastDeletedProject = nil
-                undoTimer = nil
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                self.lastDeletedProject = nil
+                self.undoTimer = nil
             }
         }
     }

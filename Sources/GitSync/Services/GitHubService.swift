@@ -385,7 +385,7 @@ final class GitHubService {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: AppConstants.keychainServiceName,
-            kSecAttrAccount as String: "default",
+            kSecAttrAccount as String: AppConstants.keychainAccountName,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -412,7 +412,7 @@ final class GitHubService {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: AppConstants.keychainServiceName,
-            kSecAttrAccount as String: "default"
+            kSecAttrAccount as String: AppConstants.keychainAccountName
         ]
 
         let update: [String: Any] = [

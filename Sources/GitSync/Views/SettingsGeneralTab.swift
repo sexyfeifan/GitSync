@@ -1,17 +1,18 @@
 // SettingsGeneralTab.swift
 // 通用设置标签页：同步目录、自动同步、历史记录、通知
+// v0.2.2 优化：直接使用 @AppStorage，移除 @Binding 依赖
 
 import SwiftUI
 
 /// 通用设置标签页内容
 struct SettingsGeneralTab: View {
     /// 应用设置（统一管理 @AppStorage）
-    @ObservedObject var settings: AppSettings
+    @ObservedObject private var settings = AppSettings.shared
 
-    /// 历史记录最大条数
-    @Binding var maxHistoryEntries: Int
-    /// 通知偏好
-    @Binding var notificationPreference: NotificationPreference
+    /// 历史记录最大条数（直接 @AppStorage，无需从父视图传递）
+    @AppStorage("maxHistoryEntries") private var maxHistoryEntries = AppConstants.maxHistoryEntries
+    /// 通知偏好（直接 @AppStorage，无需从父视图传递）
+    @AppStorage("notificationPreference") private var notificationPreference: NotificationPreference = .all
 
     var body: some View {
         Form {

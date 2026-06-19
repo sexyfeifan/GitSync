@@ -1,5 +1,6 @@
 // AutoSyncService.swift
 // 自动同步服务，使用 Timer 定期同步所有项目
+// v0.2.2 优化：添加重入保护（isSyncing 标志，跳过正在执行的同步）
 
 import Foundation
 import Combine
@@ -73,6 +74,9 @@ class AutoSyncService: ObservableObject {
     /// Combine 订阅集合
     private var cancellables = Set<AnyCancellable>()
 
+    /// 重入保护标志：是否正在执行同步，跳过正在执行的同步
+    private var isSyncing = false
+
     // MARK: - 初始化
 
     /// 创建自动同步服务
@@ -113,6 +117,7 @@ class AutoSyncService: ObservableObject {
     private func setupBindings() {
         // 监听网络状态变化
         networkMonitor.onNetworkStatusChanged = { [weak self] isConnected in
+            // 统一 Timer/Task 桥接模式：使用 Task { @MainActor [weak self] in }
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 if !isConnected {
@@ -133,8 +138,7 @@ class AutoSyncService: ObservableObject {
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                // 使用 Task 切换到 MainActor，兼容 macOS 13
-                // （MainActor.assumeIsolated 需要 macOS 14+）
+                // 统一 Timer/Task 桥接模式：使用 Task { @MainActor [weak self] in }
                 Task { @MainActor [weak self] in
                     self?.handleDefaultsChanged()
                 }
@@ -163,6 +167,7 @@ class AutoSyncService: ObservableObject {
         }
 
         let interval = settings.autoSyncIntervalSeconds
+        // 统一 Timer/Task 桥接模式：使用 Task { @MainActor [weak self] in }
         syncTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.performAutoSync()
@@ -180,8 +185,13 @@ class AutoSyncService: ObservableObject {
 
     // MARK: - 同步执行
 
-    /// 执行自动同步（扫描所有项目）
+    /// 执行自动同步（扫描所有项目，带重入保护）
     func performAutoSync() async {
+        // 重入保护：如果正在同步，跳过本次执行
+        guard !isSyncing else {
+            Log.sync.info("自动同步正在进行中，跳过本次执行")
+            return
+        }
         // 前置检查
         guard !isPaused else { return }
         guard networkMonitor.isConnected else {
@@ -190,6 +200,8 @@ class AutoSyncService: ObservableObject {
         }
         guard !projectStore.projects.isEmpty else { return }
 
+        // 设置重入保护标志
+        isSyncing = true
         appStatus = .syncing
 
         var successCount = 0
@@ -261,6 +273,9 @@ class AutoSyncService: ObservableObject {
                 failureCount: failureCount
             )
         }
+
+        // 清除重入保护标志
+        isSyncing = false
     }
 
     // MARK: - 统计更新
