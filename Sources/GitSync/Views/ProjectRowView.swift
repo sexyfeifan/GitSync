@@ -63,17 +63,41 @@ struct ProjectRowView: View {
                 ProgressView()
                     .controlSize(.mini)
             } else {
-                Button {
-                    Task {
-                        await syncSingleProject(project)
+                HStack(spacing: 4) {
+                    Button {
+                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: project.localPath)
+                    } label: {
+                        Image(systemName: "folder")
+                            .font(.caption)
                     }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption)
+                    .buttonStyle(.borderless)
+                    .help(String(localized: "在 Finder 中打开"))
+                    .accessibilityLabel(String(localized: "打开本地目录 \(project.name)"))
+
+                    Button {
+                        if let url = URL(string: project.remoteURL.replacingOccurrences(of: "git@github.com:", with: "https://github.com/").replacingOccurrences(of: ".git", with: "")) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Image(systemName: "safari")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(String(localized: "打开 GitHub 页面"))
+                    .accessibilityLabel(String(localized: "打开 \(project.name) 的 GitHub 页面"))
+
+                    Button {
+                        Task {
+                            await syncSingleProject(project)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(String(localized: "同步此项目"))
+                    .accessibilityLabel(String(localized: "同步项目 \(project.name)"))
                 }
-                .buttonStyle(.borderless)
-                .help(String(localized: "同步此项目"))
-                .accessibilityLabel(String(localized: "同步项目 \(project.name)"))
             }
         }
         .padding(.horizontal, 10)

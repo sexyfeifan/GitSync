@@ -1,35 +1,21 @@
 // SettingsProjectsTab.swift
 // 项目管理标签页：项目列表、添加项目、删除项目
-// v0.2.2 优化：showingAddProject 自管理，添加 isCloning loading 状态
 
 import SwiftUI
 
-/// 项目管理标签页内容
 struct SettingsProjectsTab: View {
-    /// 项目存储
     @EnvironmentObject var projectStore: ProjectStore
-
-    /// 删除确认弹窗状态（由父视图管理，因为 alert 需要绑定到父视图）
     @Binding var showDeleteAlert: Bool
-    /// 待删除的项目
     @Binding var projectToDelete: SyncProject?
-
-    /// 是否显示添加项目面板（自管理，无需从父视图 @Binding 传递）
     @State private var showingAddProject = false
-
-    /// 新项目的远程 URL
     @State private var newProjectURL = ""
-    /// 添加项目错误信息
     @State private var addProjectError: String?
-    /// 添加项目技术错误详情
     @State private var addProjectTechnicalError: String?
-    /// 是否正在克隆（loading 状态）
-    @State private var isCloning = false
+    @State private var isProcessing = false
 
     var body: some View {
         VStack {
             if projectStore.projects.isEmpty {
-                // 空状态提示
                 VStack(spacing: 12) {
                     Image(systemName: "folder.badge.plus")
                         .font(.title)
@@ -43,11 +29,9 @@ struct SettingsProjectsTab: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                // 项目列表
                 List {
                     ForEach(projectStore.projects) { project in
                         HStack {
-                            // 状态指示（形状+颜色，对色盲友好）
                             Image(systemName: project.syncStatus.iconName)
                                 .foregroundColor(project.syncStatus.color)
                                 .frame(width: 16, height: 16)
@@ -62,19 +46,18 @@ struct SettingsProjectsTab: View {
                                 showDeleteAlert = true
                             }
                             .buttonStyle(.borderless)
-                            .accessibilityLabel(String(localized: "删除项目 \(project.name)"))
-                            .accessibilityHint(String(localized: "弹出确认对话框"))
                         }
                     }
                 }
-                // 底部添加按钮
                 HStack {
                     Button(String(localized: "添加项目")) {
                         showingAddProject = true
                     }
                     .keyboardShortcut("n", modifiers: .command)
-                    .accessibilityLabel(String(localized: "添加新项目"))
                     Spacer()
+                    Text(String(localized: "共 \(projectStore.projects.count) 个项目"))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 8)
@@ -93,9 +76,9 @@ struct SettingsProjectsTab: View {
         VStack(spacing: 16) {
             Text(String(localized: "添加 Git 项目"))
                 .font(.headline)
-            TextField(String(localized: "GitHub 仓库 URL（HTTPS 或 SSH）"), text: $newProjectURL)
+            TextField(String(localized: "GitHub 仓库 URL"), text: $newProjectURL)
                 .textFieldStyle(.roundedBorder)
-                .disabled(isCloning)
+                .disabled(isProcessing)
             if let error = addProjectError {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
@@ -115,50 +98,75 @@ struct SettingsProjectsTab: View {
                     }
                 }
             }
-            // 克隆进度指示
-            if isCloning {
+            if isProcessing {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
-                    Text(String(localized: "正在克隆仓库..."))
+                    Text(String(localized: "正在处理..."))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
             HStack {
                 Button(String(localized: "取消")) {
-                    if !isCloning {
-                        newProjectURL = ""
-                        addProjectError = nil
-                        addProjectTechnicalError = nil
+                    if !isProcessing {
+                        resetSheet()
                         showingAddProject = false
                     }
                 }
                 .keyboardShortcut(.cancelAction)
-                .disabled(isCloning)
+                .disabled(isProcessing)
                 Button(String(localized: "添加")) {
                     Task {
                         await addProjectFromURL()
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(newProjectURL.isEmpty || isCloning)
+                .disabled(newProjectURL.isEmpty || isProcessing)
             }
         }
         .padding()
-        .frame(width: 420)
+        .frame(width: 450)
+    }
+
+    // MARK: - URL 规范化
+
+    /// 将各种 GitHub URL 格式统一为 https://github.com/owner/repo（去 .git 后缀）
+    private func normalizeGitHubURL(_ input: String) -> String {
+        var url = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        // SSH → HTTPS
+        if url.hasPrefix("git@github.com:") {
+            url = "https://github.com/" + url.replacingOccurrences(of: "git@github.com:", with: "")
+        }
+        // 去掉 .git 后缀
+        if url.hasSuffix(".git") {
+            url = String(url.dropLast(4))
+        }
+        // 去掉末尾 /
+        if url.hasSuffix("/") {
+            url = String(url.dropLast())
+        }
+        return url
     }
 
     // MARK: - 添加项目逻辑
 
-    /// 从 URL 添加新项目（支持本地已存在的仓库直接导入）
+    private func resetSheet() {
+        newProjectURL = ""
+        addProjectError = nil
+        addProjectTechnicalError = nil
+        isProcessing = false
+    }
+
     private func addProjectFromURL() async {
         addProjectError = nil
         addProjectTechnicalError = nil
 
-        guard let parsed = GitHubService.parseRepoURL(newProjectURL) else {
+        // 规范化 URL（支持 .git 后缀和 SSH 格式）
+        let normalizedURL = normalizeGitHubURL(newProjectURL)
+        guard let parsed = GitHubService.parseRepoURL(normalizedURL) else {
             addProjectError = String(localized: "无法解析 URL，请输入有效的 GitHub 仓库地址")
-            addProjectTechnicalError = String(localized: "支持的格式：\n- https://github.com/owner/repo\n- git@github.com:owner/repo.git")
+            addProjectTechnicalError = String(localized: "支持的格式：\n- https://github.com/owner/repo\n- https://github.com/owner/repo.git\n- git@github.com:owner/repo.git")
             return
         }
 
@@ -173,10 +181,11 @@ struct SettingsProjectsTab: View {
             return
         }
 
+        isProcessing = true
+
         if FileManager.default.fileExists(atPath: localPath) {
-            // 本地目录已存在
             if gitService.isGitRepository(at: localURL) {
-                // 是 Git 仓库，先备份再导入
+                // 本地已有 Git 仓库 → 备份后导入
                 let backupResult = await BackupService.shared.createBackup(
                     sourceURL: localURL,
                     projectName: parsed.name
@@ -184,59 +193,47 @@ struct SettingsProjectsTab: View {
                 let needsBackupFlag: Bool
                 switch backupResult {
                 case .success:
-                    needsBackupFlag = false // 备份成功，无需在同步时再备份
+                    needsBackupFlag = false
                 case .failure:
-                    needsBackupFlag = true // 备份失败，标记首次同步前需备份
+                    needsBackupFlag = true
                 }
 
                 let existingRemote = await gitService.remoteURL(at: localURL)
-                if let existingRemote = existingRemote,
-                   GitHubService.parseRepoURL(existingRemote) != nil {
-                    let project = SyncProject(
-                        name: parsed.name,
-                        remoteURL: existingRemote,
-                        localPath: localPath,
-                        owner: parsed.owner,
-                        needsInitialBackup: needsBackupFlag
-                    )
-                    projectStore.addProject(project)
-                    newProjectURL = ""
-                    showingAddProject = false
-                } else {
-                    _ = await gitService.setRemoteURL(at: localURL, url: newProjectURL)
-                    let project = SyncProject(
-                        name: parsed.name,
-                        remoteURL: newProjectURL,
-                        localPath: localPath,
-                        owner: parsed.owner,
-                        needsInitialBackup: needsBackupFlag
-                    )
-                    projectStore.addProject(project)
-                    newProjectURL = ""
-                    showingAddProject = false
-                }
+                let remoteURL = existingRemote ?? normalizedURL
+
+                let project = SyncProject(
+                    name: parsed.name,
+                    remoteURL: remoteURL,
+                    localPath: localPath,
+                    owner: parsed.owner,
+                    needsInitialBackup: needsBackupFlag
+                )
+                projectStore.addProject(project)
+                isProcessing = false
+                resetSheet()
+                showingAddProject = false
             } else {
+                isProcessing = false
                 addProjectError = String(localized: "本地目录已存在但不是 Git 仓库：\(localPath)")
                 addProjectTechnicalError = String(localized: "请删除该目录或选择其他同步目录后重试")
             }
             return
         }
 
-        // 本地目录不存在，克隆仓库
-        isCloning = true
-        let cloneResult = await gitService.clone(url: newProjectURL, to: localURL)
-        isCloning = false
+        // 本地目录不存在 → 克隆
+        let cloneResult = await gitService.clone(url: normalizedURL, to: localURL)
+        isProcessing = false
 
         switch cloneResult {
         case .success:
             let project = SyncProject(
                 name: parsed.name,
-                remoteURL: newProjectURL,
+                remoteURL: normalizedURL,
                 localPath: localPath,
                 owner: parsed.owner
             )
             projectStore.addProject(project)
-            newProjectURL = ""
+            resetSheet()
             showingAddProject = false
         case .failure(let error):
             addProjectError = String(localized: "克隆失败")
