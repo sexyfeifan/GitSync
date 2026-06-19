@@ -1,38 +1,61 @@
 # Changelog
 
+## v0.2.0 (2026-06-19) — 目标 8/10
+
+### Architecture (5→8)
+- 拆分 GitSyncApp.swift 到 Views/MenuBarView + ProjectRowView + SettingsView
+- 提取 3 个协议：GitServiceProtocol、SyncEngineProtocol、GitHubServiceProtocol
+- 统一结果类型 AppSyncResult + AppError
+- 提取 Constants.swift 集中管理常量
+- 统一 @AppStorage 到 AppSettings ObservableObject
+- 提取 SyncResultHandler 消除三处重复同步逻辑
+- 更新 README 与实际代码结构对齐
+
+### Concurrency (5→8)
+- GitService.extraPATHComponents 改为 let，标记 Sendable
+- SyncHistoryStore.deinit 移除 entries 访问
+- 所有 GitService 方法改为 async（withCheckedContinuation）
+- 添加进程超时（默认 30s，clone 120s）
+
+### Git Robustness (6→8)
+- rebase abort 前检查冲突标记
+- status() 返回 Result<GitStatus, GitError>
+- clone 前检查目标路径
+- commitAll 自动创建 .gitignore 排除 .DS_Store
+
+### GitHub API (4→8)
+- Token 统一 Keychain 存储，旧 UserDefaults 自动迁移
+- Rate Limit 处理（解析 X-RateLimit-Remaining/Reset）
+- 401 专用 .unauthorized 错误
+- fetchCurrentUser 实例级缓存
+- listUserRepos 添加 maxPages 限制
+- User-Agent 动态版本号
+
+### Data Persistence (7→8)
+- SyncProject 添加 CodingKeys + decodeIfPresent 向后兼容
+- 写入前备份（轮转 .bak.1/.bak.2/.bak.3）
+- maxEntries 可配置（UserDefaults 100...10000）
+- DateFormatter/RelativeDateTimeFormatter 全部 static let 缓存
+
+### UX (5→8)
+- 删除项目 Alert 确认（取消/仅删除/删除+本地文件）
+- 测试连接实现真正的 GitHub API 验证
+- 批量同步进度指示（当前项目名 + ProgressView）
+- 错误信息分层（友好提示 + 可展开技术详情）
+- 键盘快捷键（⌘S 同步/⌘N 添加/⌘Q 退出/⌘, 设置）
+- 26 处 accessibilityLabel
+- NSOpenPanel 改为 async
+
+### Code Quality (6→8)
+- 统一三套结果类型为 AppSyncResult
+- 提取 SyncResultHandler 消除代码重复
+- 所有 DateFormatter 改为 static let
+- Magic number 提取到 Constants.swift
+
 ## v0.1.1 (2026-06-19)
 
-### Bug Fixes
-- 修复 GitHub Token 键名不匹配导致 API 不工作
-- 修复 Token 明文存储改为 Keychain 安全存储
-- 修复 SF Symbol `arrow.branch` 不存在
-- 修复自动同步间隔单位不一致（分钟→秒）
-- 修复 `isOwnRepo` 语义错误（fork 仓库不再标记为自己的）
-- 修复 ProjectDetailView 主线程阻塞（git status 改为异步）
-- 修复 SyncEngine `@MainActor` 并发访问问题
-- 修复 AutoSyncService/NetworkMonitor 线程安全问题
-- 修复 GitService rename 操作解析错误
-- 修复 AddProjectSheet 失败时仍 dismiss 的问题
-
-### Improvements
-- 删除 4 个死代码文件（净减 736 行）
-- GitService 改为共享实例模式
-- GitHubService 错误处理改为 Result 类型
-- ProjectStore/SyncHistoryStore 添加 debounce 写入
-- 所有用户可见字符串改为 `String(localized:)`
-- 注入 AutoSyncService/NetworkMonitor/NotificationService
-- 状态栏图标支持 5 种动态状态（含无网络）
+- 修复 24 个问题（Token/并发/SF Symbol/单位/死代码清理）
 
 ## v0.1.0 (2026-06-19)
 
-### Features
-- 菜单栏常驻图标，动态显示同步状态
-- 添加 GitHub 仓库 URL，自动克隆到本地
-- 非自己的仓库自动 Fork
-- 智能同步引擎：fetch → 检测变更 → pull/push/rebase
-- 冲突检测与自动 rebase
-- 自动定时同步（可暂停）
-- 网络状态监控
-- 系统通知（同步完成/有更新/冲突/错误）
-- 今日同步统计
-- 设置面板（同步目录/自动同步/GitHub Token）
+- 初始版本：菜单栏同步工具
