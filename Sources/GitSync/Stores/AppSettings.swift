@@ -5,42 +5,33 @@ import Foundation
 import SwiftUI
 
 /// 应用全局设置管理器
-/// 将散落在各视图中的 @AppStorage 集中到此 ObservableObject
 final class AppSettings: ObservableObject {
-    /// 共享实例
     static let shared = AppSettings()
 
-    // MARK: - 同步设置
+    // MARK: - @AppStorage 设置
 
-    /// 自动同步间隔（分钟）
     @AppStorage(AppConstants.autoSyncIntervalKey)
     var autoSyncInterval: Double = AppConstants.defaultAutoSyncInterval
 
-    /// 是否启用自动同步
     @AppStorage(AppConstants.autoSyncEnabledKey)
     var autoSyncEnabled: Bool = true
 
-    /// 默认同步目录
     @AppStorage(AppConstants.defaultSyncPathKey)
     var defaultSyncPath: String = NSHomeDirectory() + "/GitHub"
 
-    /// 备份目录（导入已有本地仓库时自动备份原始状态）
     @AppStorage(AppConstants.backupPathKey)
     var backupPath: String = NSHomeDirectory() + "/GitSync-Backups"
 
-    /// 是否显示 Dock 图标（关闭后仅保留菜单栏图标）
     @AppStorage(AppConstants.showDockIconKey)
     var showDockIcon: Bool = true
 
-    /// 是否开机自启
     @AppStorage(AppConstants.launchAtLoginKey)
     var launchAtLogin: Bool = false
 
-    /// GitHub Personal Access Token
-    @AppStorage(AppConstants.githubTokenKey)
-    var githubToken: String = ""
+    // MARK: - GitHub Token（仅 Keychain，不存 UserDefaults）
 
-    // MARK: - 便捷属性
+    /// Token 仅存储在 Keychain，@Published 驱动 UI 更新
+    @Published var githubToken: String = ""
 
     /// 自动同步间隔（秒），带边界保护
     var autoSyncIntervalSeconds: TimeInterval {
@@ -52,5 +43,20 @@ final class AppSettings: ObservableObject {
         return seconds
     }
 
-    private init() {}
+    private init() {
+        // 启动时从 Keychain 加载 Token
+        self.githubToken = GitHubService.loadTokenFromKeychain() ?? ""
+    }
+
+    /// 保存 Token 到 Keychain 并更新内存
+    func saveToken(_ token: String) {
+        githubToken = token
+        GitHubService.saveTokenToKeychain(token)
+    }
+
+    /// 清除 Token
+    func clearToken() {
+        githubToken = ""
+        GitHubService.deleteTokenFromKeychain()
+    }
 }

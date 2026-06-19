@@ -93,7 +93,6 @@ struct SettingsProjectsTab: View {
             }
         }
         .tabItem { Label(String(localized: "项目"), systemImage: "folder") }
-        .frame(width: AppConstants.generalTabWidth, height: AppConstants.projectTabHeight)
         .sheet(isPresented: $showingAddProject) {
             addProjectSheet
         }

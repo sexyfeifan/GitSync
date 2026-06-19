@@ -112,16 +112,13 @@ struct MenuBarView: View {
 
             // 底部操作栏
             HStack(spacing: 6) {
-                // 网络状态指示
                 if !networkMonitor.isConnected {
                     Image(systemName: networkMonitor.iconName)
                         .foregroundColor(.red)
                         .font(.caption)
                         .help(networkMonitor.statusDescription)
-                        .accessibilityLabel(networkMonitor.statusDescription)
                 }
 
-                // 同步/取消按钮（根据状态切换）
                 if isSyncingAll {
                     Button(String(localized: "取消")) {
                         syncAllTask?.cancel()
@@ -129,30 +126,25 @@ struct MenuBarView: View {
                     }
                     .controlSize(.small)
                     .keyboardShortcut("s", modifiers: .command)
-                    .accessibilityLabel(String(localized: "取消同步"))
                 } else {
                     Button(String(localized: "全部同步")) {
-                        syncAllTask = Task {
-                            await performSyncAll()
-                        }
+                        syncAllTask = Task { await performSyncAll() }
                     }
                     .controlSize(.small)
                     .disabled(projectStore.projects.isEmpty || !networkMonitor.isConnected)
                     .keyboardShortcut("s", modifiers: .command)
-                    .accessibilityLabel(String(localized: "同步全部项目"))
                 }
 
                 Spacer()
 
                 Button {
-                    openWindow(id: "settings")
+                    openWindow(id: "main")
                 } label: {
-                    Image(systemName: "gear")
+                    Image(systemName: "rectangle.stack")
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
-                .keyboardShortcut(",", modifiers: .command)
-                .accessibilityLabel(String(localized: "设置"))
+                .help(String(localized: "打开项目面板"))
 
                 Button {
                     NSApplication.shared.terminate(nil)
@@ -162,19 +154,7 @@ struct MenuBarView: View {
                 .buttonStyle(.borderless)
                 .controlSize(.small)
                 .keyboardShortcut("q", modifiers: .command)
-                .accessibilityLabel(String(localized: "退出"))
-
-                Button {
-                    Darwin.exit(0)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.red)
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                .keyboardShortcut("q", modifiers: [.command, .shift])
-                .accessibilityLabel(String(localized: "强制退出"))
-                .help(String(localized: "立即终止进程（⌘⇧Q）"))
+                .help(String(localized: "退出 GitSync（⌘Q）"))
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)

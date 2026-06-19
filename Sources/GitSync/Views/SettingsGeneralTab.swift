@@ -9,10 +9,10 @@ struct SettingsGeneralTab: View {
     /// 应用设置（统一管理 @AppStorage）
     @ObservedObject private var settings = AppSettings.shared
 
-    /// 历史记录最大条数（直接 @AppStorage，无需从父视图传递）
-    @AppStorage("maxHistoryEntries") private var maxHistoryEntries = AppConstants.maxHistoryEntries
-    /// 通知偏好（直接 @AppStorage，无需从父视图传递）
-    @AppStorage("notificationPreference") private var notificationPreference: NotificationPreference = .all
+    /// 历史记录最大条数
+    @AppStorage(AppConstants.maxHistoryEntriesKey) private var maxHistoryEntries = AppConstants.maxHistoryEntries
+    /// 通知偏好
+    @AppStorage(AppConstants.notificationPreferenceKey) private var notificationPreference: NotificationPreference = .all
 
     var body: some View {
         Form {
@@ -107,7 +107,6 @@ struct SettingsGeneralTab: View {
             }
         }
         .tabItem { Label(String(localized: "通用"), systemImage: "gear") }
-        .frame(width: AppConstants.generalTabWidth, height: AppConstants.generalTabHeight + 50)
     }
 
     // MARK: - 辅助方法

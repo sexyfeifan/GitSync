@@ -4,14 +4,12 @@
 import SwiftUI
 import ServiceManagement
 
-// MARK: - App Delegate（处理 Dock 点击等 AppKit 事件）
+// MARK: - App Delegate
 
-/// AppKit 代理，处理 Dock 图标点击 → 打开设置窗口
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
             sender.activate(ignoringOtherApps: true)
-            // 尝试查找并显示已有窗口
             for window in sender.windows where window.canBecomeMain {
                 window.makeKeyAndOrderFront(nil)
                 return true
@@ -38,13 +36,17 @@ struct GitSyncApp: App {
     @State private var hasAppliedDockPolicy = false
 
     var body: some Scene {
-        // 菜单栏常驻图标
+        // 菜单栏常驻图标 — 自动同步在此初始化（确保即使不打开主窗口也能工作）
         MenuBarExtra {
             MenuBarView()
                 .environmentObject(projectStore)
                 .environmentObject(historyStore)
                 .environmentObject(networkMonitor)
                 .environmentObject(notificationService)
+                .onAppear {
+                    setupAutoSyncService()
+                    applyDockPolicy()
+                }
         } label: {
             Image(systemName: statusBarIconName)
                 .accessibilityLabel(String(localized: "GitSync 同步状态"))
@@ -52,18 +54,15 @@ struct GitSyncApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        // 主窗口（Dock 点击或菜单栏「设置」按钮打开）
-        WindowGroup(id: "settings") {
-            SettingsView()
+        // 主窗口（Dock 点击打开，展示项目仪表盘）
+        WindowGroup(id: "main") {
+            MainDashboardView()
                 .environmentObject(projectStore)
                 .environmentObject(historyStore)
-                .frame(minWidth: 600, minHeight: 480)
-                .onAppear {
-                    applyDockPolicy()
-                    setupAutoSyncService()
-                }
+                .environmentObject(networkMonitor)
+                .environmentObject(notificationService)
         }
-        .defaultSize(width: 620, height: 520)
+        .defaultSize(width: 960, height: 640)
 
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .inactive || newPhase == .background {
@@ -79,6 +78,18 @@ struct GitSyncApp: App {
         }
     }
 
+    // MARK: - 自动同步
+
+    private func setupAutoSyncService() {
+        guard autoSyncService == nil else { return }
+        autoSyncService = AutoSyncService(
+            projectStore: projectStore,
+            historyStore: historyStore,
+            notificationService: notificationService,
+            networkMonitor: networkMonitor
+        )
+    }
+
     // MARK: - Dock 图标策略
 
     private func applyDockPolicy() {
@@ -89,29 +100,13 @@ struct GitSyncApp: App {
         }
     }
 
-    // MARK: - 自动同步
-
-    private func setupAutoSyncService() {
-        guard autoSyncService == nil else { return }
-        let service = AutoSyncService(
-            projectStore: projectStore,
-            historyStore: historyStore,
-            notificationService: notificationService,
-            networkMonitor: networkMonitor
-        )
-        autoSyncService = service
-    }
-
     // MARK: - 开机自启
 
     private func toggleLaunchAtLogin(_ enabled: Bool) {
         if #available(macOS 13.0, *) {
             do {
-                if enabled {
-                    try SMAppService.mainApp.register()
-                } else {
-                    try SMAppService.mainApp.unregister()
-                }
+                if enabled { try SMAppService.mainApp.register() }
+                else { try SMAppService.mainApp.unregister() }
             } catch {
                 Log.general.error("开机自启设置失败: \(error.localizedDescription)")
             }
@@ -133,7 +128,7 @@ struct GitSyncApp: App {
         let statuses = projectStore.projects.map { $0.syncStatus }
         if statuses.contains(.syncing) { return "arrow.triangle.2.circlepath" }
         if statuses.contains(.error) || statuses.contains(.conflict) { return "exclamationmark.circle.fill" }
-        return "arrow.triangle.2.circlepath"
+        return "checkmark.circle"
     }
 
     private var statusBarAccessibilityValue: String {

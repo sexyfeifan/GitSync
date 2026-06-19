@@ -46,6 +46,10 @@ enum AppConstants {
     static let githubTokenKey = "githubToken"
     /// UserDefaults 键：自动同步是否暂停
     static let autoSyncPausedKey = "autoSyncPaused"
+    /// @AppStorage 键：历史记录最大条数
+    static let maxHistoryEntriesKey = "maxHistoryEntries"
+    /// @AppStorage 键：通知偏好
+    static let notificationPreferenceKey = "notificationPreference"
     /// UserDefaults 键：GitHub Token（Keychain 回退）
     static let gitHubTokenUserDefaultsKey = "GitSync.GitHubToken"
 

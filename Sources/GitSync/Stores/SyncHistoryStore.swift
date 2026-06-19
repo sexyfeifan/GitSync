@@ -4,7 +4,6 @@
 
 import Foundation
 import SwiftUI
-import Combine
 import os
 
 /// 同步历史记录存储管理器
@@ -21,7 +20,7 @@ class SyncHistoryStore: ObservableObject {
 
     /// 历史记录保留的最大数量（从 UserDefaults 读取，默认 1000）
     private var maxEntries: Int {
-        let stored = UserDefaults.standard.integer(forKey: "maxHistoryEntries")
+        let stored = UserDefaults.standard.integer(forKey: AppConstants.maxHistoryEntriesKey)
         // 如果未设置或为 0，使用默认值 1000；限制范围 100...10000
         guard stored > 0 else { return 1000 }
         return min(max(stored, 100), 10000)
@@ -32,9 +31,6 @@ class SyncHistoryStore: ObservableObject {
 
     /// debounce 延迟（秒），批量操作时合并写入
     private let debounceInterval: TimeInterval = 0.5
-
-    /// 最大备份数量（用于备份轮转）
-    private let maxBackupCount = 3
 
     /// 初始化存储管理器
     init() {
@@ -93,23 +89,18 @@ class SyncHistoryStore: ObservableObject {
             lockedEntries.withLock { $0 = snapshot }
         } catch {
             Log.storage.error("加载同步历史失败: \(error.localizedDescription)")
-            // [优化] 解码失败时尝试从 .bak.1 备份恢复，与 ProjectStore 保持一致
-            let backupURL = storageURL.deletingPathExtension().appendingPathExtension("bak.1")
-            if FileManager.default.fileExists(atPath: backupURL.path),
-               let backupData = try? Data(contentsOf: backupURL) {
-                let backupDecoder = JSONDecoder()
-                backupDecoder.dateDecodingStrategy = .iso8601
-                if let backupEntries = try? backupDecoder.decode([SyncHistoryEntry].self, from: backupData) {
-                    Log.storage.info("从备份 .bak.1 成功恢复 \(backupEntries.count) 条历史记录")
-                    entries = backupEntries
-                    let snapshot = entries
-                    lockedEntries.withLock { $0 = snapshot }
-                    return
-                }
+            let dec = JSONDecoder()
+            dec.dateDecodingStrategy = .iso8601
+            if let recovered: [SyncHistoryEntry] = BackupRotator.recover(url: storageURL, type: [SyncHistoryEntry].self, decoder: dec) {
+                Log.storage.info("从备份恢复 \(recovered.count) 条历史记录")
+                entries = recovered
+                let snapshot = entries
+                lockedEntries.withLock { $0 = snapshot }
+            } else {
+                Log.storage.error("备份恢复也失败，历史数据可能已丢失")
+                entries = []
+                lockedEntries.withLock { $0 = [] }
             }
-            Log.storage.error("备份恢复也失败，历史数据可能已丢失")
-            entries = []
-            lockedEntries.withLock { $0 = [] }
         }
     }
 
@@ -132,15 +123,12 @@ class SyncHistoryStore: ObservableObject {
         saveEntries()
     }
 
-    /// 保存历史记录到磁盘（内部方法，带备份轮转）
+    /// 保存历史记录到磁盘
     private func saveEntries() {
-        // 更新快照，供 deinit 中的 flushSync() 使用
         let snapshot = entries
         lockedEntries.withLock { $0 = snapshot }
 
-        // 写入前创建备份
-        createBackupIfNeeded()
-
+        BackupRotator.rotate(url: storageURL)
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -150,52 +138,10 @@ class SyncHistoryStore: ObservableObject {
         } catch {
             Log.storage.error("保存同步历史失败: \(error.localizedDescription)")
         }
-
-        // 清理超出上限的旧备份
-        cleanOldBackups()
+        BackupRotator.cleanOld(url: storageURL)
     }
 
     // MARK: - 备份管理
-
-    /// 创建备份文件：将当前文件复制为 .bak.1
-    private func createBackupIfNeeded() {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: storageURL.path) else { return }
-
-        let dir = storageURL.deletingLastPathComponent()
-        let baseName = storageURL.lastPathComponent
-
-        // 轮转：先移编号大的，避免覆盖
-        for i in stride(from: maxBackupCount, through: 2, by: -1) {
-            let older = dir.appendingPathComponent("\(baseName).bak.\(i - 1)")
-            let newer = dir.appendingPathComponent("\(baseName).bak.\(i)")
-            if fm.fileExists(atPath: older.path) {
-                try? fm.removeItem(at: newer)
-                try? fm.moveItem(at: older, to: newer)
-            }
-        }
-
-        // 将当前文件复制为 .bak.1
-        let bak1 = dir.appendingPathComponent("\(baseName).bak.1")
-        try? fm.removeItem(at: bak1)
-        try? fm.copyItem(at: storageURL, to: bak1)
-    }
-
-    /// 清理超出 maxBackupCount 的旧备份文件（最多检查到 maxBackupCount + 10）
-    private func cleanOldBackups() {
-        let fm = FileManager.default
-        let dir = storageURL.deletingLastPathComponent()
-        let baseName = storageURL.lastPathComponent
-
-        // 添加合理上限：最多检查到 maxBackupCount + 10，避免无限循环
-        let upperBound = maxBackupCount + 10
-        for i in (maxBackupCount + 1)...upperBound {
-            let bakFile = dir.appendingPathComponent("\(baseName).bak.\(i)")
-            if fm.fileExists(atPath: bakFile.path) {
-                try? fm.removeItem(at: bakFile)
-            }
-        }
-    }
 
     // MARK: - 记录管理
 

@@ -94,7 +94,6 @@ struct SettingsGitHubTab: View {
             }
         }
         .tabItem { Label("GitHub", systemImage: "person.circle") }
-        .frame(width: AppConstants.generalTabWidth, height: AppConstants.githubTabHeight + 150)
     }
 
     // MARK: - 测试连接
@@ -109,14 +108,7 @@ struct SettingsGitHubTab: View {
         testConnectionTechnicalError = nil
 
         // 先保存 Token 到 Keychain
-        do {
-            try GitHubService.saveToken(settings.githubToken)
-        } catch {
-            testConnectionMessage = String(localized: "Token 保存失败")
-            testConnectionTechnicalError = error.localizedDescription
-            isTestingConnection = false
-            return
-        }
+        settings.saveToken(settings.githubToken)
 
         // 调用 GitHub API /user
         let service = GitHubService(token: settings.githubToken)

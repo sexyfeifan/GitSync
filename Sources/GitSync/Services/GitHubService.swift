@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import os
 
 // MARK: - GitHub 仓库模型
 
@@ -154,7 +155,12 @@ enum GitHubServiceError: LocalizedError {
 @MainActor
 final class GitHubService {
     /// Token 版本号：每次 saveToken 时递增，实例检测到版本变化时清空用户缓存
-    nonisolated(unsafe) static var tokenVersion: UInt64 = 0
+    /// 使用 OSAllocatedUnfairLock 保证线程安全
+    private static let tokenVersionLock = OSAllocatedUnfairLock(initialState: UInt64(0))
+    nonisolated(unsafe) static var tokenVersion: UInt64 {
+        get { tokenVersionLock.withLock { $0 } }
+        set { tokenVersionLock.withLock { $0 = newValue } }
+    }
 
     /// API 基础 URL
     private let baseURL = AppConstants.gitHubAPIBaseURL
@@ -412,27 +418,20 @@ final class GitHubService {
 
     /// 从存储中读取 GitHub Token（统一从 Keychain 读取）
     nonisolated static func loadTokenFromStorage() -> String? {
-        // 统一从 Keychain 读取，不再回退到 UserDefaults
-        if let keychainToken = loadFromKeychain(), !keychainToken.isEmpty {
+        if let keychainToken = loadTokenFromKeychain(), !keychainToken.isEmpty {
             return keychainToken
         }
-        // 迁移：如果 UserDefaults 中有旧 token，迁移到 Keychain 后清除
+        // 迁移旧 UserDefaults token 到 Keychain
         if let oldToken = UserDefaults.standard.string(forKey: AppConstants.gitHubTokenUserDefaultsKey), !oldToken.isEmpty {
-            // [BUGFIX-3] 先验证 Keychain 写入成功，再删除 UserDefaults 中的旧数据，防止 token 丢失
-            do {
-                try saveToken(oldToken)
-                UserDefaults.standard.removeObject(forKey: AppConstants.gitHubTokenUserDefaultsKey)
-            } catch {
-                // Keychain 写入失败，保留 UserDefaults 中的旧 token 作为兜底
-                return oldToken
-            }
+            saveTokenToKeychain(oldToken)
+            UserDefaults.standard.removeObject(forKey: AppConstants.gitHubTokenUserDefaultsKey)
             return oldToken
         }
         return nil
     }
 
-    /// 从 Keychain 读取 GitHub Token
-    nonisolated private static func loadFromKeychain() -> String? {
+    /// 从 Keychain 读取 Token
+    nonisolated static func loadTokenFromKeychain() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: AppConstants.keychainServiceName,
@@ -440,45 +439,48 @@ final class GitHubService {
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
-
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-
-        guard status == errSecSuccess, let data = item as? Data else {
-            return nil
-        }
-
+        guard status == errSecSuccess, let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    /// 保存 GitHub Token 到 Keychain
-    /// - Parameter token: 要保存的 token
-    /// - Throws: 保存失败时抛出错误
-    nonisolated static func saveToken(_ token: String) throws {
-        // 递增 token 版本号，通知所有实例清空用户缓存
+    /// 保存 Token 到 Keychain
+    @discardableResult
+    nonisolated static func saveTokenToKeychain(_ token: String) -> Bool {
         tokenVersion &+= 1
         let data = token.data(using: .utf8) ?? Data()
-
-        // 先尝试更新已有条目
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: AppConstants.keychainServiceName,
             kSecAttrAccount as String: AppConstants.keychainAccountName
         ]
-
-        let update: [String: Any] = [
-            kSecValueData as String: data
-        ]
-
+        let update: [String: Any] = [kSecValueData as String: data]
         let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
         if updateStatus == errSecItemNotFound {
-            // 条目不存在，创建新条目
             var create = query
             create[kSecValueData as String] = data
             let addStatus = SecItemAdd(create as CFDictionary, nil)
-            guard addStatus == errSecSuccess || addStatus == errSecDuplicateItem else {
-                throw GitHubServiceError.tokenSaveFailed(status: addStatus)
-            }
+            return addStatus == errSecSuccess || addStatus == errSecDuplicateItem
+        }
+        return updateStatus == errSecSuccess
+    }
+
+    /// 从 Keychain 删除 Token
+    nonisolated static func deleteTokenFromKeychain() {
+        tokenVersion &+= 1
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: AppConstants.keychainServiceName,
+            kSecAttrAccount as String: AppConstants.keychainAccountName
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    /// 保存 GitHub Token（兼容旧调用）
+    nonisolated static func saveToken(_ token: String) throws {
+        guard saveTokenToKeychain(token) else {
+            throw GitHubServiceError.tokenSaveFailed(status: errSecInternalError)
         }
     }
 }

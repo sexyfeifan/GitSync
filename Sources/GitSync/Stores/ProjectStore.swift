@@ -18,9 +18,6 @@ class ProjectStore: ObservableObject {
     /// 存储文件路径
     private let storageURL: URL
 
-    /// 最大备份数量
-    private let maxBackupCount = 3
-
     /// 初始化存储管理器
     init() {
         // 在 Application Support 目录下创建存储文件
@@ -59,20 +56,15 @@ class ProjectStore: ObservableObject {
             projects = try decoder.decode([SyncProject].self, from: data)
         } catch {
             Log.storage.error("加载项目数据失败: \(error.localizedDescription)")
-            // [BUGFIX-4] 解码失败时尝试从 .bak.1 备份恢复，避免丢失所有数据
-            let backupURL = storageURL.deletingPathExtension().appendingPathExtension("bak.1")
-            if FileManager.default.fileExists(atPath: backupURL.path),
-               let backupData = try? Data(contentsOf: backupURL) {
-                let backupDecoder = JSONDecoder()
-                backupDecoder.dateDecodingStrategy = .iso8601
-                if let backupProjects = try? backupDecoder.decode([SyncProject].self, from: backupData) {
-                    Log.storage.info("从备份 .bak.1 成功恢复 \(backupProjects.count) 个项目")
-                    projects = backupProjects
-                    return
-                }
+            let dec = JSONDecoder()
+            dec.dateDecodingStrategy = .iso8601
+            if let recovered: [SyncProject] = BackupRotator.recover(url: storageURL, type: [SyncProject].self, decoder: dec) {
+                Log.storage.info("从备份恢复 \(recovered.count) 个项目")
+                projects = recovered
+            } else {
+                Log.storage.error("备份恢复也失败，数据可能已丢失")
+                projects = []
             }
-            Log.storage.error("备份恢复也失败，数据可能已丢失")
-            projects = []
         }
     }
 
@@ -89,13 +81,9 @@ class ProjectStore: ObservableObject {
         }
     }
 
-    /// 实际执行磁盘写入（在 MainActor 上执行）
-    /// 写入前先备份旧文件，最多保留 maxBackupCount 个备份
+    /// 实际执行磁盘写入
     private func writeProjectsToDisk() {
-        // 步骤 1：创建备份（仅在旧文件存在时）
-        createBackupIfNeeded()
-
-        // 步骤 2：写入新数据
+        BackupRotator.rotate(url: storageURL)
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -105,50 +93,7 @@ class ProjectStore: ObservableObject {
         } catch {
             Log.storage.error("保存项目数据失败: \(error.localizedDescription)")
         }
-
-        // 步骤 3：清理超出上限的旧备份
-        cleanOldBackups()
-    }
-
-    /// 创建备份文件：将当前 projects.json 复制为 projects.json.bak.1
-    /// 备份轮转：.bak.3 → 删除，.bak.2 → .bak.3，.bak.1 → .bak.2，当前 → .bak.1
-    private func createBackupIfNeeded() {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: storageURL.path) else { return }
-
-        let dir = storageURL.deletingLastPathComponent()
-        let baseName = storageURL.lastPathComponent
-
-        // 轮转：先移编号大的，避免覆盖
-        for i in stride(from: maxBackupCount, through: 2, by: -1) {
-            let older = dir.appendingPathComponent("\(baseName).bak.\(i - 1)")
-            let newer = dir.appendingPathComponent("\(baseName).bak.\(i)")
-            if fm.fileExists(atPath: older.path) {
-                try? fm.removeItem(at: newer)
-                try? fm.moveItem(at: older, to: newer)
-            }
-        }
-
-        // 将当前文件复制为 .bak.1
-        let bak1 = dir.appendingPathComponent("\(baseName).bak.1")
-        try? fm.removeItem(at: bak1)
-        try? fm.copyItem(at: storageURL, to: bak1)
-    }
-
-    /// 清理超出 maxBackupCount 的旧备份文件（最多检查到 maxBackupCount + 10，避免无限循环）
-    private func cleanOldBackups() {
-        let fm = FileManager.default
-        let dir = storageURL.deletingLastPathComponent()
-        let baseName = storageURL.lastPathComponent
-
-        // 添加合理上限：最多检查到 maxBackupCount + 10，避免无限循环
-        let upperBound = maxBackupCount + 10
-        for i in (maxBackupCount + 1)...upperBound {
-            let bakFile = dir.appendingPathComponent("\(baseName).bak.\(i)")
-            if fm.fileExists(atPath: bakFile.path) {
-                try? fm.removeItem(at: bakFile)
-            }
-        }
+        BackupRotator.cleanOld(url: storageURL)
     }
 
     // MARK: - CRUD 操作
