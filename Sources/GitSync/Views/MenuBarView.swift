@@ -17,6 +17,7 @@ struct MenuBarView: View {
     @EnvironmentObject var historyStore: SyncHistoryStore
     @EnvironmentObject var networkMonitor: NetworkMonitor
     @EnvironmentObject var notificationService: NotificationService
+    @Environment(\.openWindow) private var openWindow
     @State private var searchText = ""
 
     /// 应用设置（统一管理 @AppStorage）
@@ -142,7 +143,7 @@ struct MenuBarView: View {
                 Spacer()
 
                 Button(String(localized: "设置")) {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    openWindow(id: "settings")
                 }
                 .keyboardShortcut(",", modifiers: .command)
                 .accessibilityLabel(String(localized: "打开设置"))
@@ -241,8 +242,7 @@ struct MenuBarView: View {
         undoTimer?.invalidate()
         // 统一 Timer/Task 桥接模式：使用 Task { @MainActor [weak self] in }
         undoTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
+            Task { @MainActor in
                 self.lastDeletedProject = nil
                 self.undoTimer = nil
             }

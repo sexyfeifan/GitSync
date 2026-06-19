@@ -32,15 +32,16 @@ struct GitSyncApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        // 设置窗口
-        Settings {
+        // 设置窗口（使用 WindowGroup 替代 Settings，确保 macOS 26 兼容）
+        WindowGroup(id: "settings") {
             SettingsView()
                 .environmentObject(projectStore)
                 .environmentObject(historyStore)
+                .onAppear {
+                    setupAutoSyncService()
+                }
         }
-        .onAppear {
-            setupAutoSyncService()
-        }
+        .defaultSize(width: 600, height: 500)
         .onChange(of: scenePhase) { newPhase in
             // 应用进入非活跃状态时，强制刷写所有待保存数据到磁盘
             if newPhase == .inactive || newPhase == .background {

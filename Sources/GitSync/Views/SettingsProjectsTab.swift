@@ -151,7 +151,7 @@ struct SettingsProjectsTab: View {
 
     // MARK: - 添加项目逻辑
 
-    /// 从 URL 添加新项目（带 loading 状态）
+    /// 从 URL 添加新项目（支持本地已存在的仓库直接导入）
     private func addProjectFromURL() async {
         addProjectError = nil
         addProjectTechnicalError = nil
@@ -164,17 +164,57 @@ struct SettingsProjectsTab: View {
 
         let settings = AppSettings.shared
         let localPath = settings.defaultSyncPath + "/" + parsed.name
+        let localURL = URL(fileURLWithPath: localPath)
+        let gitService = GitService.shared
 
-        // 检查本地路径是否已存在
-        if FileManager.default.fileExists(atPath: localPath) {
-            addProjectError = String(localized: "本地目录已存在：\(localPath)")
+        // 检查是否已添加过此项目
+        if projectStore.projects.contains(where: { $0.localPath == localPath }) {
+            addProjectError = String(localized: "该项目已添加：\(parsed.name)")
             return
         }
 
-        // 克隆仓库（显示 loading 状态）
+        if FileManager.default.fileExists(atPath: localPath) {
+            // 本地目录已存在
+            if gitService.isGitRepository(at: localURL) {
+                // 是 Git 仓库，直接导入
+                let existingRemote = await gitService.remoteURL(at: localURL)
+                if let existingRemote = existingRemote,
+                   GitHubService.parseRepoURL(existingRemote) != nil {
+                    // 远程 URL 可解析，直接添加
+                    let project = SyncProject(
+                        name: parsed.name,
+                        remoteURL: existingRemote,
+                        localPath: localPath,
+                        owner: parsed.owner
+                    )
+                    projectStore.addProject(project)
+                    newProjectURL = ""
+                    showingAddProject = false
+                } else {
+                    // 无有效远程，设置用户提供的 URL 作为远程
+                    addProjectError = String(localized: "本地仓库无有效远程地址，正在设置...")
+                    _ = await gitService.setRemoteURL(at: localURL, url: newProjectURL)
+                    let project = SyncProject(
+                        name: parsed.name,
+                        remoteURL: newProjectURL,
+                        localPath: localPath,
+                        owner: parsed.owner
+                    )
+                    projectStore.addProject(project)
+                    newProjectURL = ""
+                    showingAddProject = false
+                }
+            } else {
+                // 目录存在但不是 Git 仓库
+                addProjectError = String(localized: "本地目录已存在但不是 Git 仓库：\(localPath)")
+                addProjectTechnicalError = String(localized: "请删除该目录或选择其他同步目录后重试")
+            }
+            return
+        }
+
+        // 本地目录不存在，克隆仓库
         isCloning = true
-        let gitService = GitService.shared
-        let cloneResult = await gitService.clone(url: newProjectURL, to: URL(fileURLWithPath: localPath))
+        let cloneResult = await gitService.clone(url: newProjectURL, to: localURL)
         isCloning = false
 
         switch cloneResult {

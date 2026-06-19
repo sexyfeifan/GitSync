@@ -13,7 +13,7 @@ protocol GitHubServiceProtocol {
     func forkRepo(owner: String, name: String) async -> Result<GitHubRepo, GitHubServiceError>
 
     /// 列出当前用户的所有仓库
-    func listUserRepos() async -> [GitHubRepo]
+    func listUserRepos(maxPages: Int) async -> [GitHubRepo]
 
     /// 检查指定 owner 是否为当前用户
     func checkIsOwnRepo(owner: String) async -> Bool

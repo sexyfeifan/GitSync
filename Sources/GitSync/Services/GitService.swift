@@ -181,6 +181,45 @@ final class GitService: Sendable {
         }
     }
 
+    /// 获取 origin 远程仓库 URL
+    /// - Parameter at: 本地仓库路径
+    /// - Returns: 远程 URL，失败时返回 nil
+    func remoteURL(at path: URL) async -> String? {
+        let result = await executeGit(args: ["remote", "get-url", "origin"], in: path)
+        switch result {
+        case .success(let output):
+            let url = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return url.isEmpty ? nil : url
+        case .failure:
+            return nil
+        }
+    }
+
+    /// 检查指定路径是否为有效的 Git 仓库
+    /// - Parameter at: 本地路径
+    /// - Returns: true 表示是 Git 仓库
+    func isGitRepository(at path: URL) -> Bool {
+        let gitDir = path.appendingPathComponent(".git")
+        return FileManager.default.fileExists(atPath: gitDir.path)
+    }
+
+    /// 设置或更新 origin 远程地址
+    /// - Parameters:
+    ///   - at: 本地仓库路径
+    ///   - url: 远程仓库 URL
+    /// - Returns: 操作结果
+    func setRemoteURL(at path: URL, url: String) async -> Result<Void, GitError> {
+        // 先尝试移除已有的 origin
+        _ = await executeGit(args: ["remote", "remove", "origin"], in: path)
+        // 添加新的 origin
+        switch await executeGit(args: ["remote", "add", "origin", url], in: path) {
+        case .success:
+            return .success(())
+        case .failure(let error):
+            return .failure(error)
+        }
+    }
+
     // MARK: - 变更检测
 
     /// 检测是否有远端变更（比较本地 HEAD 和远端 HEAD）

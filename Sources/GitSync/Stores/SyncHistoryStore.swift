@@ -89,7 +89,8 @@ class SyncHistoryStore: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             entries = try decoder.decode([SyncHistoryEntry].self, from: data)
-            lockedEntries.withLock { $0 = entries }
+            let snapshot = entries
+            lockedEntries.withLock { $0 = snapshot }
         } catch {
             Log.storage.error("加载同步历史失败: \(error.localizedDescription)")
             // [优化] 解码失败时尝试从 .bak.1 备份恢复，与 ProjectStore 保持一致
@@ -101,7 +102,8 @@ class SyncHistoryStore: ObservableObject {
                 if let backupEntries = try? backupDecoder.decode([SyncHistoryEntry].self, from: backupData) {
                     Log.storage.info("从备份 .bak.1 成功恢复 \(backupEntries.count) 条历史记录")
                     entries = backupEntries
-                    lockedEntries.withLock { $0 = entries }
+                    let snapshot = entries
+                    lockedEntries.withLock { $0 = snapshot }
                     return
                 }
             }
@@ -133,7 +135,8 @@ class SyncHistoryStore: ObservableObject {
     /// 保存历史记录到磁盘（内部方法，带备份轮转）
     private func saveEntries() {
         // 更新快照，供 deinit 中的 flushSync() 使用
-        lockedEntries.withLock { $0 = entries }
+        let snapshot = entries
+        lockedEntries.withLock { $0 = snapshot }
 
         // 写入前创建备份
         createBackupIfNeeded()

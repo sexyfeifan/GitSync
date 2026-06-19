@@ -136,7 +136,7 @@ final class GitHubService {
     /// 缓存是否已填充
     private var hasCachedUser: Bool = false
     /// 记录创建缓存时的 token 版本号，用于检测 token 是否已更换
-    private var cachedTokenVersion: UInt64 = Self.tokenVersion
+    private var cachedTokenVersion: UInt64 = 0
 
     /// 初始化 GitHub 服务
     /// - Parameters:
@@ -145,6 +145,7 @@ final class GitHubService {
     init(token: String? = nil, session: URLSession = .shared) {
         self.token = token ?? Self.loadTokenFromStorage()
         self.session = session
+        self.cachedTokenVersion = Self.tokenVersion
     }
 
     // MARK: - 仓库操作

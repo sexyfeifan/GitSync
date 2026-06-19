@@ -41,3 +41,8 @@ Debug/
 # 配置文件（包含 Token 等敏感信息时排除）
 # 如果需要保留本地配置，请取消注释：
 # config.local.json
+
+# GitSync 自动添加
+Thumbs.db
+*.swp
+*~

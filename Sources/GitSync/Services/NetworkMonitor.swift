@@ -81,7 +81,7 @@ class NetworkMonitor: ObservableObject {
     /// 检测当前网络连接类型
     /// - Parameter path: NWPath 网络路径
     /// - Returns: 连接类型的中文描述
-    private static func detectConnectionType(path: NWPath) -> String {
+    private nonisolated static func detectConnectionType(path: NWPath) -> String {
         if path.usesInterfaceType(.wifi) {
             return "Wi-Fi"
         } else if path.usesInterfaceType(.cellular) {

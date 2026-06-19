@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 5.10
 // GitSync - macOS 菜单栏 Git 同步工具
 
 import PackageDescription
