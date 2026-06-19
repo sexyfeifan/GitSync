@@ -38,6 +38,10 @@ enum AppConstants {
     static let defaultSyncPathKey = "defaultSyncPath"
     /// @AppStorage 键：备份目录
     static let backupPathKey = "backupPath"
+    /// @AppStorage 键：是否显示 Dock 图标
+    static let showDockIconKey = "showDockIcon"
+    /// @AppStorage 键：开机自启
+    static let launchAtLoginKey = "launchAtLogin"
     /// @AppStorage 键：GitHub Token
     static let githubTokenKey = "githubToken"
     /// UserDefaults 键：自动同步是否暂停

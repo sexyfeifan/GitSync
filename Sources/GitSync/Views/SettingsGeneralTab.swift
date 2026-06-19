@@ -97,6 +97,14 @@ struct SettingsGeneralTab: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            // 应用行为
+            Section(String(localized: "应用行为")) {
+                Toggle(String(localized: "在 Dock 栏显示图标"), isOn: $settings.showDockIcon)
+                    .accessibilityHint(String(localized: "关闭后仅保留菜单栏图标，应用在后台运行"))
+                Toggle(String(localized: "开机自启动"), isOn: $settings.launchAtLogin)
+                    .accessibilityHint(String(localized: "登录时自动启动 GitSync"))
+            }
         }
         .tabItem { Label(String(localized: "通用"), systemImage: "gear") }
         .frame(width: AppConstants.generalTabWidth, height: AppConstants.generalTabHeight + 50)

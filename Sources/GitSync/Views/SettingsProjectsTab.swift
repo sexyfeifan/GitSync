@@ -31,22 +31,51 @@ struct SettingsProjectsTab: View {
             } else {
                 List {
                     ForEach(projectStore.projects) { project in
-                        HStack {
-                            Image(systemName: project.syncStatus.iconName)
-                                .foregroundColor(project.syncStatus.color)
-                                .frame(width: 16, height: 16)
-                                .accessibilityLabel(project.syncStatus.accessibilityDescription)
-                            VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Image(systemName: project.syncStatus.iconName)
+                                    .foregroundColor(project.syncStatus.color)
+                                    .frame(width: 16, height: 16)
                                 Text(project.name).font(.headline)
-                                Text(project.remoteURL).font(.caption).foregroundColor(.secondary)
+                                Spacer()
+                                Button(String(localized: "删除"), role: .destructive) {
+                                    projectToDelete = project
+                                    showDeleteAlert = true
+                                }
+                                .buttonStyle(.borderless)
                             }
-                            Spacer()
-                            Button(String(localized: "删除"), role: .destructive) {
-                                projectToDelete = project
-                                showDeleteAlert = true
+                            HStack(spacing: 4) {
+                                Image(systemName: "link")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                                Text(project.remoteURL)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .textSelection(.enabled)
                             }
-                            .buttonStyle(.borderless)
+                            HStack(spacing: 4) {
+                                Image(systemName: "terminal")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                                Text(sshURL(from: project.remoteURL))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .textSelection(.enabled)
+                            }
+                            HStack(spacing: 4) {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                                Text(project.localPath)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .textSelection(.enabled)
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
                 }
                 HStack {
@@ -131,19 +160,24 @@ struct SettingsProjectsTab: View {
 
     // MARK: - URL 规范化
 
-    /// 将各种 GitHub URL 格式统一为 https://github.com/owner/repo（去 .git 后缀）
+    /// HTTPS URL → SSH URL
+    private func sshURL(from httpsURL: String) -> String {
+        var url = httpsURL
+        if url.hasSuffix(".git") { url = String(url.dropLast(4)) }
+        if url.hasSuffix("/") { url = String(url.dropLast()) }
+        url = url.replacingOccurrences(of: "https://github.com/", with: "git@github.com:")
+        return url + ".git"
+    }
+
+    /// 格式统一：SSH 转 HTTPS、去尾部空格和斜杠，保留 .git 后缀
     private func normalizeGitHubURL(_ input: String) -> String {
         var url = input.trimmingCharacters(in: .whitespacesAndNewlines)
         // SSH → HTTPS
         if url.hasPrefix("git@github.com:") {
             url = "https://github.com/" + url.replacingOccurrences(of: "git@github.com:", with: "")
         }
-        // 去掉 .git 后缀
-        if url.hasSuffix(".git") {
-            url = String(url.dropLast(4))
-        }
-        // 去掉末尾 /
-        if url.hasSuffix("/") {
+        // 去掉末尾 /（但保留 .git）
+        while url.hasSuffix("/") {
             url = String(url.dropLast())
         }
         return url

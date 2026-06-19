@@ -28,6 +28,14 @@ final class AppSettings: ObservableObject {
     @AppStorage(AppConstants.backupPathKey)
     var backupPath: String = NSHomeDirectory() + "/GitSync-Backups"
 
+    /// 是否显示 Dock 图标（关闭后仅保留菜单栏图标）
+    @AppStorage(AppConstants.showDockIconKey)
+    var showDockIcon: Bool = true
+
+    /// 是否开机自启
+    @AppStorage(AppConstants.launchAtLoginKey)
+    var launchAtLogin: Bool = false
+
     /// GitHub Personal Access Token
     @AppStorage(AppConstants.githubTokenKey)
     var githubToken: String = ""

@@ -75,7 +75,12 @@ struct ProjectRowView: View {
                     .accessibilityLabel(String(localized: "打开本地目录 \(project.name)"))
 
                     Button {
-                        if let url = URL(string: project.remoteURL.replacingOccurrences(of: "git@github.com:", with: "https://github.com/").replacingOccurrences(of: ".git", with: "")) {
+                        var clean = project.remoteURL
+                        if clean.hasSuffix(".git") { clean = String(clean.dropLast(4)) }
+                        if clean.hasPrefix("git@github.com:") {
+                            clean = "https://github.com/" + clean.replacingOccurrences(of: "git@github.com:", with: "")
+                        }
+                        if let url = URL(string: clean) {
                             NSWorkspace.shared.open(url)
                         }
                     } label: {
