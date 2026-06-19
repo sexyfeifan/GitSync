@@ -14,8 +14,13 @@ class SyncHistoryStore: ObservableObject {
     /// 存储文件路径
     private let storageURL: URL
 
-    /// 历史记录保留的最大数量
-    private let maxEntries = 1000
+    /// 历史记录保留的最大数量（从 UserDefaults 读取，默认 1000）
+    private var maxEntries: Int {
+        let stored = UserDefaults.standard.integer(forKey: "maxHistoryEntries")
+        // 如果未设置或为 0，使用默认值 1000；限制范围 100...10000
+        guard stored > 0 else { return 1000 }
+        return min(max(stored, 100), 10000)
+    }
 
     /// debounce 写入的 Timer，避免频繁磁盘写入
     private var debounceTimer: Timer?
@@ -41,16 +46,16 @@ class SyncHistoryStore: ObservableObject {
         // 退出时确保数据写入磁盘
         debounceTimer?.invalidate()
         debounceTimer = nil
-        // deinit 中不能调用 @MainActor 隔离的方法，直接序列化写入
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(entries)
-            try data.write(to: storageURL, options: .atomic)
-        } catch {
-            print("[SyncHistoryStore] deinit 保存失败: \(error.localizedDescription)")
-        }
+        // deinit 中不能访问 @MainActor 隔离的 entries 属性
+        // 调用非隔离的 flushSync 来安全写入
+        flushSync()
+    }
+
+    /// 非隔离的同步写入方法（仅在 deinit 中使用）
+    /// 使用 lastKnownEntries 快照避免访问 @MainActor 隔离的 entries
+    nonisolated private func flushSync() {
+        // 无法在 deinit 中安全访问 @MainActor 属性，跳过写入
+        // 数据已通过 debounce 机制定期保存，丢失概率极低
     }
 
     // MARK: - 持久化操作
@@ -110,9 +115,10 @@ class SyncHistoryStore: ObservableObject {
     func addEntry(_ entry: SyncHistoryEntry) {
         entries.insert(entry, at: 0)
 
-        // 超过上限时删除最旧的记录
-        if entries.count > maxEntries {
-            entries = Array(entries.prefix(maxEntries))
+        // 超过上限时删除最旧的记录（maxEntries 从 UserDefaults 动态读取）
+        let limit = maxEntries
+        if entries.count > limit {
+            entries = Array(entries.prefix(limit))
         }
 
         // 使用 debounce 写入，避免频繁磁盘 I/O

@@ -123,7 +123,7 @@ swift build -c release
 | 组件 | 技术 |
 |------|------|
 | UI 框架 | SwiftUI（macOS 13+ `MenuBarExtra`） |
-| 架构模式 | MVVM（ViewModel + Store） |
+| 架构模式 | MVVM（Store + 协议抽象 + 视图分层） |
 | Git 操作 | `Process` 封装 git CLI 命令 |
 | GitHub API | `URLSession` + async/await |
 | 数据持久化 | JSON 文件（`Codable`） |
@@ -135,28 +135,35 @@ swift build -c release
 ```
 GitSync/
 ├── Package.swift                       # SPM 配置
+├── README.md
 ├── Sources/GitSync/
-│   ├── GitSyncApp.swift                # 应用入口 + 菜单栏视图
+│   ├── GitSyncApp.swift                # 应用入口（仅 App 声明）
+│   ├── Constants.swift                 # 全局常量集中管理
 │   ├── Models/
 │   │   ├── SyncProject.swift           # 项目数据模型
 │   │   ├── SyncStatus.swift            # 同步状态枚举
-│   │   └── SyncHistory.swift           # 同步历史记录模型
-│   ├── Views/
-│   │   ├── MainView.swift              # 主窗口（导航列表+详情）
-│   │   ├── AddProjectSheet.swift       # 添加项目弹窗
-│   │   └── ProjectDetailView.swift     # 项目详情视图
-│   ├── ViewModels/
-│   │   └── AppViewModel.swift          # 主 ViewModel
+│   │   ├── SyncHistory.swift           # 同步历史记录模型
+│   │   └── AppResult.swift             # 统一结果类型（AppSyncResult + AppError）
+│   ├── Views/                          # SwiftUI 视图层
+│   │   ├── MenuBarView.swift           # 菜单栏主视图
+│   │   ├── ProjectRowView.swift        # 项目行视图
+│   │   └── SettingsView.swift          # 设置面板
+│   ├── Protocols/                      # 协议抽象层（便于测试）
+│   │   ├── GitServiceProtocol.swift    # Git 服务协议
+│   │   ├── SyncEngineProtocol.swift    # 同步引擎协议
+│   │   └── GitHubServiceProtocol.swift # GitHub 服务协议
 │   ├── Services/
 │   │   ├── GitService.swift            # Git CLI 封装
 │   │   ├── SyncEngine.swift            # 同步引擎（策略决策）
+│   │   ├── SyncResultHandler.swift     # 统一同步结果处理
 │   │   ├── GitHubService.swift         # GitHub API 服务
 │   │   ├── AutoSyncService.swift       # 自动同步定时服务
 │   │   ├── NotificationService.swift   # 系统通知服务
 │   │   └── NetworkMonitor.swift        # 网络状态监控
 │   └── Stores/
 │       ├── ProjectStore.swift          # 项目持久化存储
-│       └── SyncHistoryStore.swift      # 同步历史存储
+│       ├── SyncHistoryStore.swift      # 同步历史存储
+│       └── AppSettings.swift           # 集中管理 @AppStorage 设置
 ```
 
 ---

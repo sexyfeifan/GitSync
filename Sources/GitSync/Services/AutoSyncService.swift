@@ -33,8 +33,10 @@ class AutoSyncService: ObservableObject {
     private let notificationService: NotificationService
     /// 网络监控
     private let networkMonitor: NetworkMonitor
-    /// Git 同步引擎
-    private let syncEngine: SyncEngine
+    /// 同步结果处理器（统一处理逻辑，消除重复代码）
+    private let resultHandler: SyncResultHandler
+    /// 应用设置
+    private let settings = AppSettings.shared
 
     // MARK: - 发布状态
 
@@ -44,7 +46,7 @@ class AutoSyncService: ObservableObject {
     /// 是否已暂停同步
     @Published var isPaused: Bool = false {
         didSet {
-            UserDefaults.standard.set(isPaused, forKey: "autoSyncPaused")
+            UserDefaults.standard.set(isPaused, forKey: AppConstants.autoSyncPausedKey)
             if isPaused {
                 stopTimer()
             } else {
@@ -67,31 +69,12 @@ class AutoSyncService: ObservableObject {
     /// 自动同步定时器
     private var syncTimer: Timer?
 
-    /// 自动同步间隔（秒）
-    /// 注意：设置界面存储的是分钟值（1/5/15/60），需要乘以 60 转换为秒
-    private var autoSyncInterval: TimeInterval {
-        let minutes = UserDefaults.standard.double(forKey: "autoSyncInterval")
-        // 默认 5 分钟 = 300 秒
-        guard minutes > 0 else { return 300 }
-        return (minutes * 60.0).clamped(to: 60...3600, defaultValue: 300)
-    }
-
-    /// 自动同步是否启用
-    private var autoSyncEnabled: Bool {
-        UserDefaults.standard.object(forKey: "autoSyncEnabled") as? Bool ?? true
-    }
-
     /// Combine 订阅集合
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - 初始化
 
     /// 创建自动同步服务
-    /// - Parameters:
-    ///   - projectStore: 项目存储
-    ///   - historyStore: 历史存储
-    ///   - notificationService: 通知服务
-    ///   - networkMonitor: 网络监控
     init(
         projectStore: ProjectStore,
         historyStore: SyncHistoryStore,
@@ -102,16 +85,22 @@ class AutoSyncService: ObservableObject {
         self.historyStore = historyStore
         self.notificationService = notificationService
         self.networkMonitor = networkMonitor
-        self.syncEngine = SyncEngine(gitService: .shared, historyStore: historyStore)
+
+        let syncEngine = SyncEngine(gitService: .shared, historyStore: historyStore)
+        self.resultHandler = SyncResultHandler(
+            syncEngine: syncEngine,
+            projectStore: projectStore,
+            notificationService: notificationService
+        )
 
         // 恢复暂停状态
-        self.isPaused = UserDefaults.standard.bool(forKey: "autoSyncPaused")
+        self.isPaused = UserDefaults.standard.bool(forKey: AppConstants.autoSyncPausedKey)
 
         setupBindings()
         updateStats()
 
         // 启动定时器（如果未暂停且已启用）
-        if autoSyncEnabled && !isPaused {
+        if settings.autoSyncEnabled && !isPaused {
             startTimer()
         }
     }
@@ -129,8 +118,7 @@ class AutoSyncService: ObservableObject {
                     self.stopTimer()
                     self.notificationService.postNetworkDisconnected()
                 } else {
-                    // 网络恢复，如果未暂停则重启定时器
-                    if self.autoSyncEnabled && !self.isPaused {
+                    if self.settings.autoSyncEnabled && !self.isPaused {
                         self.appStatus = .idle
                         self.startTimer()
                         self.notificationService.postNetworkRestored()
@@ -153,8 +141,7 @@ class AutoSyncService: ObservableObject {
 
     /// 处理 UserDefaults 变化
     private func handleDefaultsChanged() {
-        if autoSyncEnabled && !isPaused {
-            // 重启定时器以应用新的间隔
+        if settings.autoSyncEnabled && !isPaused {
             stopTimer()
             startTimer()
         } else {
@@ -168,17 +155,18 @@ class AutoSyncService: ObservableObject {
     func startTimer() {
         stopTimer()
 
-        guard autoSyncEnabled, !isPaused, networkMonitor.isConnected else {
+        guard settings.autoSyncEnabled, !isPaused, networkMonitor.isConnected else {
             return
         }
 
-        syncTimer = Timer.scheduledTimer(withTimeInterval: autoSyncInterval, repeats: true) { [weak self] _ in
+        let interval = settings.autoSyncIntervalSeconds
+        syncTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.performAutoSync()
             }
         }
 
-        print("自动同步定时器已启动，间隔：\(Int(autoSyncInterval)) 秒")
+        print("自动同步定时器已启动，间隔：\(Int(interval)) 秒")
     }
 
     /// 停止自动同步定时器
@@ -212,13 +200,15 @@ class AutoSyncService: ObservableObject {
                 break
             }
 
-            let result = await syncSingleProject(project)
+            let result = await resultHandler.syncSingleProject(
+                project,
+                syncingMessage: String(localized: "自动同步中...")
+            )
 
             switch result {
             case .success:
                 successCount += 1
             case .upToDate:
-                // 无需计入统计
                 break
             case .conflict(let details):
                 conflictCount += 1
@@ -270,29 +260,6 @@ class AutoSyncService: ObservableObject {
         }
     }
 
-    /// 同步单个项目
-    /// - Parameter project: 要同步的项目
-    /// - Returns: 同步结果
-    private func syncSingleProject(_ project: SyncProject) async -> GitSyncResult {
-        projectStore.updateSyncStatus(for: project.id, status: .syncing, message: String(localized: "自动同步中..."))
-
-        let result = await syncEngine.syncProject(project)
-
-        switch result {
-        case .success(let message):
-            projectStore.updateSyncStatus(for: project.id, status: .synced, message: message)
-            notificationService.postSyncCompleted(projectName: project.name, message: message)
-        case .upToDate:
-            projectStore.updateSyncStatus(for: project.id, status: .synced, message: String(localized: "已是最新"))
-        case .conflict(let details):
-            projectStore.updateSyncStatus(for: project.id, status: .conflict, message: String(localized: "冲突：\(details)"))
-        case .error(let message):
-            projectStore.updateSyncStatus(for: project.id, status: .error, message: message)
-        }
-
-        return result
-    }
-
     // MARK: - 统计更新
 
     /// 更新今日统计数据
@@ -308,17 +275,5 @@ class AutoSyncService: ObservableObject {
         todaySyncCount = 0
         todayPushCount = 0
         todayConflictCount = 0
-    }
-}
-
-// MARK: - TimeInterval 范围扩展
-
-private extension TimeInterval {
-    /// 将值限制在指定范围内，超出范围时使用默认值
-    func clamped(to range: ClosedRange<TimeInterval>, defaultValue: TimeInterval) -> TimeInterval {
-        if self >= range.lowerBound && self <= range.upperBound {
-            return self
-        }
-        return defaultValue
     }
 }

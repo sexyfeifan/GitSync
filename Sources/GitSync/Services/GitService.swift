@@ -57,13 +57,14 @@ struct GitStatus {
 // MARK: - Git 服务
 
 /// Git CLI 封装，通过 Process 执行 git 命令
-/// 参考 NookDesk 的 ProcessRunner 模式，使用临时文件捕获输出
-final class GitService {
+/// 已标记 Sendable，所有可变状态在 init 后不再变化
+final class GitService: Sendable {
     /// 共享实例，避免每次调用都创建新对象
     static let shared = GitService()
 
     /// 额外的 PATH 组件，会在执行命令前添加到环境变量
-    var extraPATHComponents: [String]
+    /// 改为 let 确保线程安全（初始化后不可变）
+    let extraPATHComponents: [String]
 
     init(extraPATHComponents: [String]? = nil) {
         #if os(macOS)
@@ -82,6 +83,11 @@ final class GitService {
     ///   - to: 本地目标路径
     /// - Returns: 操作结果
     func clone(url: String, to: URL) -> Result<Void, GitError> {
+        // 克隆前检查目标路径是否已存在，避免覆盖已有仓库
+        if FileManager.default.fileExists(atPath: to.path) {
+            return .failure(.cloneFailed(url: url, reason: "目标路径已存在: \(to.path)"))
+        }
+
         // 确保父目录存在
         let parentDir = to.deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: parentDir.path) {
@@ -145,21 +151,19 @@ final class GitService {
 
     // MARK: - 状态查询
 
-    /// 获取工作区状态
-    /// - Parameter at: 本地仓库路径
-    /// - Returns: GitStatus 结构体
-    func status(at path: URL) -> GitStatus {
+    /// 获取工作区状态，失败时返回错误而非静默返回空状态
+    func status(at path: URL) -> Result<GitStatus, GitError> {
         guard FileManager.default.fileExists(atPath: path.path) else {
-            return GitStatus(modified: [], added: [], deleted: [], untracked: [], hasConflicts: false, conflictFiles: [])
+            return .failure(.pathNotFound(path: path.path))
         }
 
         let result = executeGit(args: ["status", "--porcelain=v1"], in: path)
 
         switch result {
         case .success(let output):
-            return parseStatusOutput(output)
-        case .failure:
-            return GitStatus(modified: [], added: [], deleted: [], untracked: [], hasConflicts: false, conflictFiles: [])
+            return .success(parseStatusOutput(output))
+        case .failure(let error):
+            return .failure(error)
         }
     }
 
@@ -210,7 +214,13 @@ final class GitService {
     /// - Returns: true 表示有本地变更
     func hasLocalChanges(localPath: URL) -> Bool {
         // 检查工作区是否有未提交的变更
-        let currentStatus = status(at: localPath)
+        let currentStatus: GitStatus
+        switch status(at: localPath) {
+        case .success(let s):
+            currentStatus = s
+        case .failure:
+            return false
+        }
         if !currentStatus.isClean {
             return true
         }
@@ -241,6 +251,9 @@ final class GitService {
     ///   - message: 提交信息
     /// - Returns: 提交信息或错误
     func commitAll(at path: URL, message: String) -> Result<String, GitError> {
+        // 确保存在 .gitignore 并排除常见无关文件
+        ensureGitignore(at: path)
+
         // 先暂存所有变更
         switch executeGit(args: ["add", "-A"], in: path) {
         case .failure(let error):
@@ -262,8 +275,20 @@ final class GitService {
         let result = executeGit(args: ["rebase", onto], in: path)
         switch result {
         case .failure:
-            // rebase 失败可能是冲突，中止 rebase 以保持仓库干净
-            _ = executeGit(args: ["rebase", "--abort"], in: path)
+            // 只有确认存在冲突标记时才 abort，避免误中止其他失败原因
+            let conflictMarkers = ["CONFLICT", "conflict", "could not apply", "Failed to merge"]
+            // 检查 git status 输出中是否有冲突指示
+            let statusResult = executeGit(args: ["status"], in: path)
+            let hasConflict: Bool
+            switch statusResult {
+            case .success(let output):
+                hasConflict = conflictMarkers.contains { output.localizedCaseInsensitiveContains($0) }
+            case .failure:
+                hasConflict = false
+            }
+            if hasConflict {
+                _ = executeGit(args: ["rebase", "--abort"], in: path)
+            }
             return result
         case .success:
             return result
@@ -274,8 +299,12 @@ final class GitService {
     /// - Parameter at: 本地仓库路径
     /// - Returns: true 表示有冲突
     func detectConflict(at path: URL) -> Bool {
-        let currentStatus = status(at: path)
-        return currentStatus.hasConflicts
+        switch status(at: path) {
+        case .success(let currentStatus):
+            return currentStatus.hasConflicts
+        case .failure:
+            return false
+        }
     }
 
     // MARK: - 私有辅助方法
@@ -380,18 +409,109 @@ final class GitService {
         try runGitBlocking(args: args, in: cwd)
     }
 
-    /// 异步版本：使用 withCheckedContinuation 包装，避免阻塞线程池
-    private func runGitAsync(args: [String], in cwd: URL) async throws -> (stdout: String, stderr: String) {
+    /// 异步执行 git 命令，带超时保护（普通命令 30 秒，clone 120 秒）
+    private func runGitAsync(args: [String], in cwd: URL, timeoutSeconds: TimeInterval = 30) async throws -> (stdout: String, stderr: String) {
         try await withCheckedThrowingContinuation { continuation in
-            // 在后台队列执行 Process，避免阻塞主线程
             DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                let fm = FileManager.default
+                process.currentDirectoryURL = cwd
+                process.environment = self.enrichedEnvironment(for: cwd)
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                process.arguments = ["git"] + args
+
+                let tempRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                let stdoutURL = tempRoot.appendingPathComponent("gitsync-\(UUID().uuidString)-stdout.log")
+                let stderrURL = tempRoot.appendingPathComponent("gitsync-\(UUID().uuidString)-stderr.log")
+
+                fm.createFile(atPath: stdoutURL.path, contents: Data())
+                fm.createFile(atPath: stderrURL.path, contents: Data())
+                guard let stdoutHandle = try? FileHandle(forWritingTo: stdoutURL),
+                      let stderrHandle = try? FileHandle(forWritingTo: stderrURL) else {
+                    continuation.resume(throwing: GitError.commandFailed(command: "git", code: -1, output: "无法创建临时文件"))
+                    return
+                }
+
+                process.standardOutput = stdoutHandle
+                process.standardError = stderrHandle
+
                 do {
-                    let result = try self.runGitBlocking(args: args, in: cwd)
-                    continuation.resume(returning: result)
+                    try process.run()
                 } catch {
-                    continuation.resume(throwing: error)
+                    continuation.resume(throwing: GitError.commandFailed(command: "git", code: -1, output: error.localizedDescription))
+                    return
+                }
+
+                // 超时保护：超时后 kill 进程
+                let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+                timer.schedule(deadline: .now() + timeoutSeconds)
+                timer.setEventHandler {
+                    if process.isRunning {
+                        process.terminate()
+                    }
+                }
+                timer.resume()
+
+                process.waitUntilExit()
+                timer.cancel()
+
+                try? stdoutHandle.synchronizeFile()
+                try? stderrHandle.synchronizeFile()
+                try? stdoutHandle.close()
+                try? stderrHandle.close()
+
+                let stdoutData = (try? Data(contentsOf: stdoutURL)) ?? Data()
+                let stderrData = (try? Data(contentsOf: stderrURL)) ?? Data()
+                try? fm.removeItem(at: stdoutURL)
+                try? fm.removeItem(at: stderrURL)
+
+                let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+                if process.terminationStatus != 0 {
+                    let commandLine = (["git"] + args).joined(separator: " ")
+                    let output = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
+                    // 判断是否为超时导致的 kill
+                    if process.terminationReason == .uncaughtSignal {
+                        continuation.resume(throwing: GitError.commandFailed(command: commandLine, code: -1, output: "命令超时（\(Int(timeoutSeconds))秒）: \(output)"))
+                    } else {
+                        continuation.resume(throwing: GitError.commandFailed(command: commandLine, code: process.terminationStatus, output: output))
+                    }
+                } else {
+                    continuation.resume(returning: (stdout, stderr))
                 }
             }
+        }
+    }
+
+    /// 确保仓库根目录有 .gitignore，排除常见无关文件
+    private func ensureGitignore(at path: URL) {
+        let gitignoreURL = path.appendingPathComponent(".gitignore")
+        let defaultEntries = [".DS_Store", "Thumbs.db", "*.swp", "*~", ".AppleDouble", ".LSOverride"]
+
+        if FileManager.default.fileExists(atPath: gitignoreURL.path) {
+            // 已有 .gitignore，检查是否需要追加 .DS_Store 等
+            guard let existing = try? String(contentsOf: gitignoreURL, encoding: .utf8) else { return }
+            var missing: [String] = []
+            for entry in defaultEntries {
+                if !existing.contains(entry) {
+                    missing.append(entry)
+                }
+            }
+            if !missing.isEmpty {
+                let append = "\n# GitSync 自动添加\n" + missing.joined(separator: "\n") + "\n"
+                if let handle = try? FileHandle(forWritingTo: gitignoreURL) {
+                    handle.seekToEndOfFile()
+                    if let data = append.data(using: .utf8) {
+                        handle.write(data)
+                    }
+                    handle.closeFile()
+                }
+            }
+        } else {
+            // 不存在，创建默认 .gitignore
+            let content = "# GitSync 自动创建\n" + defaultEntries.joined(separator: "\n") + "\n"
+            try? content.write(to: gitignoreURL, atomically: true, encoding: .utf8)
         }
     }
 

@@ -56,8 +56,28 @@ struct GitHubParent: Codable {
 
 // MARK: - GitHub 服务错误
 
+/// GitHub 用户信息（用于测试连接返回）
+struct GitHubUserInfo: Codable {
+    /// 用户名
+    let login: String
+    /// 头像 URL
+    let avatarURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case login
+        case avatarURL = "avatar_url"
+    }
+}
+
 /// GitHub API 相关错误，保留完整错误上下文
 enum GitHubServiceError: LocalizedError {
+    /// 缓存的短时间格式化器（避免每次创建新实例）
+    private static let shortTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     /// URL 格式无效
     case invalidURL(url: String)
     /// HTTP 请求返回非成功状态码
@@ -68,6 +88,10 @@ enum GitHubServiceError: LocalizedError {
     case decodingFailed(url: String, underlying: Error)
     /// 网络请求异常
     case networkError(url: String, underlying: Error)
+    /// 认证失败（401）
+    case unauthorized
+    /// API 速率限制（403 且 X-RateLimit-Remaining=0）
+    case rateLimited(resetDate: Date)
 
     var errorDescription: String? {
         switch self {
@@ -83,6 +107,10 @@ enum GitHubServiceError: LocalizedError {
             return "响应解析失败（\(url)）：\(underlying.localizedDescription)"
         case .networkError(let url, let underlying):
             return "网络请求失败（\(url)）：\(underlying.localizedDescription)"
+        case .unauthorized:
+            return "GitHub 认证失败（401）：请检查 Token 是否有效"
+        case .rateLimited(let resetDate):
+            return "GitHub API 速率限制已达上限，将在 \(Self.shortTimeFormatter.string(from: resetDate)) 后重置"
         }
     }
 }
@@ -93,11 +121,22 @@ enum GitHubServiceError: LocalizedError {
 /// Token 从 UserDefaults 或 Keychain 读取
 final class GitHubService {
     /// API 基础 URL
-    private let baseURL = "https://api.github.com"
+    private let baseURL = AppConstants.gitHubAPIBaseURL
     /// GitHub Personal Access Token
     private let token: String?
     /// URL 会话
     private let session: URLSession
+    /// fetchCurrentUser 的缓存结果（实例级缓存）
+    private var cachedCurrentUser: String?
+    /// 缓存是否已填充
+    private var hasCachedUser: Bool = false
+
+    /// User-Agent 版本号（从 Bundle.main 获取）
+    private static let userAgent: String = {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "GitSync/\(version) (\(build))"
+    }()
 
     /// 初始化 GitHub 服务
     /// - Parameters:
@@ -131,13 +170,14 @@ final class GitHubService {
     }
 
     /// 列出当前用户的所有仓库
-    /// - Returns: 仓库列表（分页获取，遇到错误时停止并返回已获取的部分）
-    func listUserRepos() async -> [GitHubRepo] {
+    /// - Parameter maxPages: 最大分页数（默认 10，每页 100 个，即最多 1000 个仓库）
+    /// - Returns: 仓库列表
+    func listUserRepos(maxPages: Int = 10) async -> [GitHubRepo] {
         // 分页获取所有仓库（每页 100 个）
         var allRepos: [GitHubRepo] = []
         var page = 1
 
-        while true {
+        while page <= maxPages {
             let url = "\(baseURL)/user/repos?per_page=100&page=\(page)&sort=updated"
             let result: Result<[GitHubRepo], GitHubServiceError> = await performRequest(url: url, method: "GET")
             switch result {
@@ -153,6 +193,7 @@ final class GitHubService {
                 return allRepos
             }
         }
+        return allRepos
     }
 
     /// 检查指定 owner 是否为当前用户（即是否是自己的仓库）
@@ -163,6 +204,13 @@ final class GitHubService {
             return false
         }
         return owner.lowercased() == currentUser.lowercased()
+    }
+
+    /// 测试连接：调用 GitHub API /user 获取当前用户信息
+    /// - Returns: Result 包含用户信息（用户名、头像 URL）或错误
+    func testConnection() async -> Result<GitHubUserInfo, GitHubServiceError> {
+        let url = "\(baseURL)/user"
+        return await performRequest(url: url, method: "GET")
     }
 
     /// 检查当前用户的 fork 是否已存在
@@ -226,8 +274,11 @@ final class GitHubService {
         return String(name.dropLast(4))
     }
 
-    /// 获取当前登录用户的用户名
+    /// 获取当前登录用户的用户名（带实例级缓存）
     private func fetchCurrentUser() async -> String? {
+        if hasCachedUser {
+            return cachedCurrentUser
+        }
         let url = "\(baseURL)/user"
         struct UserResponse: Codable {
             let login: String
@@ -235,6 +286,8 @@ final class GitHubService {
         let result: Result<UserResponse, GitHubServiceError> = await performRequest(url: url, method: "GET")
         switch result {
         case .success(let user):
+            cachedCurrentUser = user.login
+            hasCachedUser = true
             return user.login
         case .failure:
             return nil
@@ -254,7 +307,7 @@ final class GitHubService {
         var request = URLRequest(url: requestURL)
         request.httpMethod = method
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("GitSync/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
 
         // 添加认证 header（如果有 token）
         if let token = token, !token.isEmpty {
@@ -267,6 +320,20 @@ final class GitHubService {
             // 检查 HTTP 状态码
             guard let httpResponse = response as? HTTPURLResponse else {
                 return .failure(.networkError(url: url, underlying: URLError(.badServerResponse)))
+            }
+
+            // 检查 Rate Limit（解析 X-RateLimit-Remaining 和 X-RateLimit-Reset）
+            if let remainingStr = httpResponse.value(forHTTPHeaderField: "X-RateLimit-Remaining"),
+               let remaining = Int(remainingStr), remaining == 0 {
+                let resetTimestamp = httpResponse.value(forHTTPHeaderField: "X-RateLimit-Reset")
+                    .flatMap { Double($0) } ?? 0
+                let resetDate = Date(timeIntervalSince1970: resetTimestamp)
+                return .failure(.rateLimited(resetDate: resetDate))
+            }
+
+            // 401 专用错误处理
+            if httpResponse.statusCode == 401 {
+                return .failure(.unauthorized)
             }
 
             // 成功状态码范围：200-299
@@ -286,22 +353,26 @@ final class GitHubService {
 
     // MARK: - Token 存储
 
-    /// 从存储中读取 GitHub Token
-    /// 优先从 Keychain 读取，其次从 UserDefaults 读取
+    /// 从存储中读取 GitHub Token（统一从 Keychain 读取）
     static func loadTokenFromStorage() -> String? {
-        // 优先从 Keychain 读取
+        // 统一从 Keychain 读取，不再回退到 UserDefaults
         if let keychainToken = loadFromKeychain(), !keychainToken.isEmpty {
             return keychainToken
         }
-        // 回退到 UserDefaults
-        return UserDefaults.standard.string(forKey: "GitSync.GitHubToken")
+        // 迁移：如果 UserDefaults 中有旧 token，迁移到 Keychain 后清除
+        if let oldToken = UserDefaults.standard.string(forKey: AppConstants.gitHubTokenUserDefaultsKey), !oldToken.isEmpty {
+            try? saveToken(oldToken)
+            UserDefaults.standard.removeObject(forKey: AppConstants.gitHubTokenUserDefaultsKey)
+            return oldToken
+        }
+        return nil
     }
 
     /// 从 Keychain 读取 GitHub Token
     private static func loadFromKeychain() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.gitsync.github.token",
+            kSecAttrService as String: AppConstants.keychainServiceName,
             kSecAttrAccount as String: "default",
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
@@ -326,7 +397,7 @@ final class GitHubService {
         // 先尝试更新已有条目
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.gitsync.github.token",
+            kSecAttrService as String: AppConstants.keychainServiceName,
             kSecAttrAccount as String: "default"
         ]
 

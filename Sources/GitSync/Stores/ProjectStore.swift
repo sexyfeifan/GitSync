@@ -17,6 +17,9 @@ class ProjectStore: ObservableObject {
     /// 存储文件路径
     private let storageURL: URL
 
+    /// 最大备份数量
+    private let maxBackupCount = 3
+
     /// 初始化存储管理器
     init() {
         // 在 Application Support 目录下创建存储文件
@@ -60,14 +63,19 @@ class ProjectStore: ObservableObject {
         // 创建新的防抖任务
         debounceTask = Task { [weak self] in
             // 延迟 0.5 秒，期间如有新调用会被取消
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: AppConstants.debounceDelayNanoseconds)
             guard !Task.isCancelled else { return }
             self?.writeProjectsToDisk()
         }
     }
 
     /// 实际执行磁盘写入（在 MainActor 上执行）
+    /// 写入前先备份旧文件，最多保留 maxBackupCount 个备份
     private func writeProjectsToDisk() {
+        // 步骤 1：创建备份（仅在旧文件存在时）
+        createBackupIfNeeded()
+
+        // 步骤 2：写入新数据
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -76,6 +84,51 @@ class ProjectStore: ObservableObject {
             try data.write(to: storageURL, options: .atomic)
         } catch {
             print("[ProjectStore] 保存项目数据失败: \(error.localizedDescription)")
+        }
+
+        // 步骤 3：清理超出上限的旧备份
+        cleanOldBackups()
+    }
+
+    /// 创建备份文件：将当前 projects.json 复制为 projects.json.bak.1
+    /// 备份轮转：.bak.3 → 删除，.bak.2 → .bak.3，.bak.1 → .bak.2，当前 → .bak.1
+    private func createBackupIfNeeded() {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: storageURL.path) else { return }
+
+        let dir = storageURL.deletingLastPathComponent()
+        let baseName = storageURL.lastPathComponent
+
+        // 轮转：先移编号大的，避免覆盖
+        for i in stride(from: maxBackupCount, through: 2, by: -1) {
+            let older = dir.appendingPathComponent("\(baseName).bak.\(i - 1)")
+            let newer = dir.appendingPathComponent("\(baseName).bak.\(i)")
+            if fm.fileExists(atPath: older.path) {
+                try? fm.removeItem(at: newer)
+                try? fm.moveItem(at: older, to: newer)
+            }
+        }
+
+        // 将当前文件复制为 .bak.1
+        let bak1 = dir.appendingPathComponent("\(baseName).bak.1")
+        try? fm.removeItem(at: bak1)
+        try? fm.copyItem(at: storageURL, to: bak1)
+    }
+
+    /// 清理超出 maxBackupCount 的旧备份文件
+    private func cleanOldBackups() {
+        let fm = FileManager.default
+        let dir = storageURL.deletingLastPathComponent()
+        let baseName = storageURL.lastPathComponent
+
+        // 删除编号大于 maxBackupCount 的备份
+        for i in (maxBackupCount + 1)... {
+            let bakFile = dir.appendingPathComponent("\(baseName).bak.\(i)")
+            if fm.fileExists(atPath: bakFile.path) {
+                try? fm.removeItem(at: bakFile)
+            } else {
+                break // 不存在则无需继续
+            }
         }
     }
 
@@ -91,10 +144,23 @@ class ProjectStore: ObservableObject {
         saveProjects()
     }
 
-    /// 删除项目
+    /// 删除项目（仅删除记录，不删除本地文件）
     func deleteProject(_ project: SyncProject) {
         projects.removeAll { $0.id == project.id }
         saveProjects()
+    }
+
+    /// 删除项目并可选删除本地文件
+    /// - Parameters:
+    ///   - project: 要删除的项目
+    ///   - deleteLocalFiles: 是否同时删除本地文件
+    func deleteProject(_ project: SyncProject, deleteLocalFiles: Bool) {
+        projects.removeAll { $0.id == project.id }
+        saveProjects()
+        if deleteLocalFiles {
+            let url = URL(fileURLWithPath: project.localPath)
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     /// 按 ID 删除项目

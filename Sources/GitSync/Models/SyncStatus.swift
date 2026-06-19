@@ -21,6 +21,14 @@ enum SyncStatus: String, Codable, CaseIterable {
     case notSynced
 
     /// SF Symbols 图标名称
+    /// 每种状态使用不同形状（对色盲友好）：
+    /// - synced: 勾选圆形 ✓
+    /// - syncing: 旋转箭头 ↻
+    /// - hasUpdate: 下载圆形 ↓
+    /// - localAhead: 上传圆形 ↑
+    /// - conflict: 警告三角形 △
+    /// - error: 叉号圆形 ✕
+    /// - notSynced: 虚线圆形 ○
     var iconName: String {
         switch self {
         case .synced:
@@ -41,6 +49,7 @@ enum SyncStatus: String, Codable, CaseIterable {
     }
 
     /// 状态对应的颜色
+    /// 注意：conflict 使用三角形形状，error 使用圆形+叉号，颜色虽同为红色但形状不同
     var color: Color {
         switch self {
         case .synced:
@@ -52,7 +61,7 @@ enum SyncStatus: String, Codable, CaseIterable {
         case .localAhead:
             return .orange
         case .conflict:
-            return .red
+            return .orange
         case .error:
             return .red
         case .notSynced:
@@ -77,6 +86,26 @@ enum SyncStatus: String, Codable, CaseIterable {
             return String(localized: "错误")
         case .notSynced:
             return String(localized: "未同步")
+        }
+    }
+
+    /// 无障碍辅助文本，提供纯文字描述（配合 VoiceOver 使用）
+    var accessibilityDescription: String {
+        switch self {
+        case .synced:
+            return String(localized: "已同步，勾选标记")
+        case .syncing:
+            return String(localized: "同步中，旋转箭头")
+        case .hasUpdate:
+            return String(localized: "有更新，下载箭头")
+        case .localAhead:
+            return String(localized: "本地领先，上传箭头")
+        case .conflict:
+            return String(localized: "冲突，警告三角形")
+        case .error:
+            return String(localized: "错误，叉号标记")
+        case .notSynced:
+            return String(localized: "未同步，虚线圆圈")
         }
     }
 }
