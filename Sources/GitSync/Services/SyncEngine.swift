@@ -9,10 +9,10 @@ enum GitSyncResult {
     case success(message: String)
     /// 已是最新，无需同步
     case upToDate
-    /// 发生冲突（包含冲突文件列表）
-    case conflict(files: [String])
-    /// 同步失败
-    case error(Error)
+    /// 发生冲突（包含冲突描述）
+    case conflict(details: String)
+    /// 同步失败（包含错误信息）
+    case error(message: String)
 }
 
 // MARK: - 同步引擎
@@ -20,7 +20,7 @@ enum GitSyncResult {
 /// Git 同步引擎，协调本地和远程仓库的同步流程
 /// 流程：fetch → 检测远端变更 → 检测本地变更 → pull/push/rebase
 /// 每次同步记录到 SyncHistoryStore
-final class GitSyncEngine {
+final class SyncEngine {
     /// Git 服务实例
     private let gitService: GitService
     /// 同步历史存储
@@ -37,11 +37,29 @@ final class GitSyncEngine {
 
     /// 同步指定项目
     /// 完整流程：fetch → 检测远端变更 → 检测本地变更 → 决策同步策略 → 执行同步
+    /// 边界情况处理：目录不存在、不是 git 仓库、网络不可达等
     /// - Parameter project: 要同步的项目（使用 Models/SyncProject.swift 中定义的类型）
     /// - Returns: 同步结果
     func syncProject(_ project: SyncProject) async -> GitSyncResult {
         let localPath = project.localURL
         let startTime = Date()
+
+        // 边界情况：目录不存在
+        guard FileManager.default.fileExists(atPath: localPath.path) else {
+            recordSync(project: project, action: .sync, result: .failure,
+                      message: "本地目录不存在: \(localPath.path)", startTime: startTime,
+                      fromCommit: nil)
+            return .error(message: "本地目录不存在: \(localPath.path)")
+        }
+
+        // 边界情况：不是 git 仓库（检查 .git 目录）
+        let gitDir = localPath.appendingPathComponent(".git")
+        guard FileManager.default.fileExists(atPath: gitDir.path) else {
+            recordSync(project: project, action: .sync, result: .failure,
+                      message: "不是 Git 仓库: \(localPath.path)", startTime: startTime,
+                      fromCommit: nil)
+            return .error(message: "不是 Git 仓库: \(localPath.path)")
+        }
 
         // 记录当前 commit hash（用于历史记录）
         let fromCommit = gitService.commitHash(at: localPath)
@@ -52,7 +70,7 @@ final class GitSyncEngine {
             recordSync(project: project, action: .sync, result: .failure,
                       message: "Fetch 失败: \(error.localizedDescription)", startTime: startTime,
                       fromCommit: fromCommit)
-            return .error(error)
+            return .error(message: "Fetch 失败: \(error.localizedDescription)")
         case .success:
             break
         }
@@ -101,7 +119,7 @@ final class GitSyncEngine {
             recordSync(project: project, action: .pull, result: .failure,
                       message: "拉取失败: \(error.localizedDescription)", startTime: startTime,
                       fromCommit: fromCommit)
-            return .error(error)
+            return .error(message: "拉取失败: \(error.localizedDescription)")
         }
     }
 
@@ -116,7 +134,7 @@ final class GitSyncEngine {
                 recordSync(project: project, action: .push, result: .failure,
                           message: "提交本地变更失败: \(error.localizedDescription)", startTime: startTime,
                           fromCommit: fromCommit)
-                return .error(error)
+                return .error(message: "提交本地变更失败: \(error.localizedDescription)")
             }
         }
 
@@ -131,7 +149,7 @@ final class GitSyncEngine {
             recordSync(project: project, action: .push, result: .failure,
                       message: "推送失败: \(error.localizedDescription)", startTime: startTime,
                       fromCommit: fromCommit)
-            return .error(error)
+            return .error(message: "推送失败: \(error.localizedDescription)")
         }
     }
 
@@ -146,7 +164,7 @@ final class GitSyncEngine {
                 recordSync(project: project, action: .sync, result: .failure,
                           message: "提交本地变更失败: \(error.localizedDescription)", startTime: startTime,
                           fromCommit: fromCommit)
-                return .error(error)
+                return .error(message: "提交本地变更失败: \(error.localizedDescription)")
             }
         }
 
@@ -166,17 +184,18 @@ final class GitSyncEngine {
                 recordSync(project: project, action: .sync, result: .failure,
                           message: "推送失败（rebase 后）: \(error.localizedDescription)", startTime: startTime,
                           fromCommit: fromCommit)
-                return .error(error)
+                return .error(message: "推送失败（rebase 后）: \(error.localizedDescription)")
             }
 
         case .failure:
             // rebase 失败，说明有冲突
             // rebase 已被中止（GitService.rebase 会自动 abort）
             let conflictFiles = status.conflictFiles
+            let details = conflictFiles.joined(separator: ", ")
             recordSync(project: project, action: .sync, result: .conflict,
-                      message: "冲突文件: \(conflictFiles.joined(separator: ", "))", startTime: startTime,
+                      message: "冲突文件: \(details)", startTime: startTime,
                       fromCommit: fromCommit)
-            return .conflict(files: conflictFiles)
+            return .conflict(details: "冲突文件: \(details)")
         }
     }
 

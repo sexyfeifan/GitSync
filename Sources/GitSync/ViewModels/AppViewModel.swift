@@ -54,7 +54,7 @@ class AppViewModel: ObservableObject {
         if !isOwn {
             statusText = "不是自己的仓库，正在 Fork..."
             if let fork = await gitHubService.forkRepo(owner: owner, name: name) {
-                finalOwner = fork.owner
+                finalOwner = fork.owner.login
                 forkedFrom = "\(owner)/\(name)"
                 statusText = "Fork 成功：\(fork.fullName)"
             } else {
@@ -178,10 +178,12 @@ class AppViewModel: ObservableObject {
 
     // MARK: - 检测状态
 
+    /// 检测单个项目的同步状态
     func detectStatus(for project: SyncProject) {
-        let hasRemote = gitService.hasRemoteChanges(localPath: project.localPath)
-        let hasLocal = gitService.hasLocalChanges(localPath: project.localPath)
-        let hasConflict = gitService.detectConflict(at: URL(fileURLWithPath: project.localPath))
+        let localURL = URL(fileURLWithPath: project.localPath)
+        let hasRemote = gitService.hasRemoteChanges(localPath: localURL)
+        let hasLocal = gitService.hasLocalChanges(localPath: localURL)
+        let hasConflict = gitService.detectConflict(at: localURL)
 
         let newStatus: SyncStatus
         if hasConflict {
@@ -199,6 +201,7 @@ class AppViewModel: ObservableObject {
         projectStore.updateSyncStatus(for: project.id, status: newStatus)
     }
 
+    /// 检测所有项目的状态
     func detectAllStatuses() {
         for project in projectStore.projects {
             detectStatus(for: project)

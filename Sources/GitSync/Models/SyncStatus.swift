@@ -7,6 +7,8 @@ import SwiftUI
 enum SyncStatus: String, Codable, CaseIterable {
     /// 已同步，本地与远程一致
     case synced
+    /// 同步进行中
+    case syncing
     /// 远程有新提交，需要拉取
     case hasUpdate
     /// 本地有新提交，需要推送
@@ -23,6 +25,8 @@ enum SyncStatus: String, Codable, CaseIterable {
         switch self {
         case .synced:
             return "checkmark.circle.fill"
+        case .syncing:
+            return "arrow.clockwise"
         case .hasUpdate:
             return "arrow.down.circle.fill"
         case .localAhead:
@@ -41,6 +45,8 @@ enum SyncStatus: String, Codable, CaseIterable {
         switch self {
         case .synced:
             return .green
+        case .syncing:
+            return .blue
         case .hasUpdate:
             return .blue
         case .localAhead:
@@ -59,6 +65,8 @@ enum SyncStatus: String, Codable, CaseIterable {
         switch self {
         case .synced:
             return "已同步"
+        case .syncing:
+            return "同步中"
         case .hasUpdate:
             return "有更新"
         case .localAhead:

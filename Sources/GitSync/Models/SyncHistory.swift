@@ -2,6 +2,7 @@
 // 同步历史记录模型
 
 import Foundation
+import SwiftUI
 
 /// 同步操作类型
 enum SyncAction: String, Codable {
@@ -15,6 +16,17 @@ enum SyncAction: String, Codable {
     case clone
     /// 解决冲突
     case resolveConflict
+
+    /// SF Symbols 图标名称
+    var iconName: String {
+        switch self {
+        case .pull: return "arrow.down.circle"
+        case .push: return "arrow.up.circle"
+        case .sync: return "arrow.triangle.2.circlepath"
+        case .clone: return "arrow.down.to.line"
+        case .resolveConflict: return "checkmark.shield"
+        }
+    }
 }
 
 /// 同步操作结果
@@ -27,6 +39,16 @@ enum SyncResult: String, Codable {
     case noChange
     /// 存在冲突
     case conflict
+
+    /// 结果对应的颜色
+    var color: Color {
+        switch self {
+        case .success: return .green
+        case .failure: return .red
+        case .noChange: return .gray
+        case .conflict: return .orange
+        }
+    }
 }
 
 /// 同步历史记录条目

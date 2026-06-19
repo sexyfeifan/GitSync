@@ -8,12 +8,21 @@ struct GitSyncApp: App {
     @StateObject private var projectStore = ProjectStore()
     @StateObject private var historyStore = SyncHistoryStore()
 
+    /// 自动同步间隔（分钟），从 UserDefaults 读取
+    @AppStorage("autoSyncInterval") private var autoSyncInterval = 5.0
+    /// 是否启用自动同步
+    @AppStorage("autoSyncEnabled") private var autoSyncEnabled = true
+
     var body: some Scene {
         // 菜单栏常驻图标，macOS 13+ MenuBarExtra
-        MenuBarExtra("GitSync", systemImage: "arrow.triangle.2.circlepath") {
+        // 图标根据同步状态动态变化
+        MenuBarExtra {
             MenuBarView()
                 .environmentObject(projectStore)
                 .environmentObject(historyStore)
+        } label: {
+            // 状态栏图标：根据同步状态变化
+            Image(systemName: statusBarIconName)
         }
         .menuBarExtraStyle(.window)
 
@@ -24,6 +33,21 @@ struct GitSyncApp: App {
                 .environmentObject(historyStore)
         }
     }
+
+    /// 根据项目同步状态动态计算状态栏图标
+    /// - 同步中: arrow.triangle.2.circlepath（旋转效果）
+    /// - 有错误/冲突: exclamationmark.circle.fill
+    /// - 正常: arrow.triangle.2.circlepath
+    private var statusBarIconName: String {
+        let statuses = projectStore.projects.map { $0.syncStatus }
+        if statuses.contains(.syncing) {
+            return "arrow.triangle.2.circlepath"
+        }
+        if statuses.contains(.error) || statuses.contains(.conflict) {
+            return "exclamationmark.circle.fill"
+        }
+        return "arrow.triangle.2.circlepath"
+    }
 }
 
 // MARK: - 菜单栏主视图
@@ -32,6 +56,11 @@ struct MenuBarView: View {
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var historyStore: SyncHistoryStore
     @State private var searchText = ""
+
+    /// 自动同步间隔（分钟）
+    @AppStorage("autoSyncInterval") private var autoSyncInterval = 5.0
+    /// 是否启用自动同步
+    @AppStorage("autoSyncEnabled") private var autoSyncEnabled = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -78,7 +107,9 @@ struct MenuBarView: View {
             // 底部操作栏
             HStack {
                 Button("全部同步") {
-                    projectStore.syncAll()
+                    Task {
+                        await projectStore.syncAll()
+                    }
                 }
                 .disabled(projectStore.projects.isEmpty)
 
@@ -95,11 +126,42 @@ struct MenuBarView: View {
             .padding(8)
         }
         .frame(width: 320)
+        .onAppear {
+            // 启动自动同步定时器
+            startAutoSyncIfNeeded()
+        }
+        .onChange(of: autoSyncEnabled) { _ in
+            startAutoSyncIfNeeded()
+        }
+        .onChange(of: autoSyncInterval) { _ in
+            startAutoSyncIfNeeded()
+        }
     }
 
     /// 按搜索关键词过滤项目
     private var filteredProjects: [SyncProject] {
         projectStore.filterProjects(searchText: searchText)
+    }
+
+    // MARK: - 自动同步定时器
+
+    /// 自动同步定时器（使用静态变量避免重复创建）
+    @State private var autoSyncTimer: Timer?
+
+    /// 启动自动同步定时器（如果已启用）
+    private func startAutoSyncIfNeeded() {
+        autoSyncTimer?.invalidate()
+        autoSyncTimer = nil
+
+        guard autoSyncEnabled, autoSyncInterval > 0 else { return }
+
+        // 间隔单位为分钟，转换为秒
+        let intervalSeconds = autoSyncInterval * 60.0
+        autoSyncTimer = Timer.scheduledTimer(withTimeInterval: intervalSeconds, repeats: true) { _ in
+            Task { @MainActor in
+                await projectStore.syncAll()
+            }
+        }
     }
 }
 
@@ -148,7 +210,9 @@ struct ProjectRowView: View {
             // 操作按钮
             VStack(spacing: 4) {
                 Button {
-                    projectStore.syncProject(project)
+                    Task {
+                        await projectStore.syncProject(project)
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }

@@ -120,6 +120,16 @@ final class GitHubService {
         return allRepos
     }
 
+    /// 检查指定 owner 是否为当前用户（即是否是自己的仓库）
+    /// - Parameter owner: 仓库所有者用户名
+    /// - Returns: true 表示是当前用户的仓库
+    func checkIsOwnRepo(owner: String) async -> Bool {
+        guard let currentUser = await fetchCurrentUser() else {
+            return false
+        }
+        return owner.lowercased() == currentUser.lowercased()
+    }
+
     /// 检查当前用户的 fork 是否已存在
     /// - Parameters:
     ///   - owner: 源仓库所有者
@@ -136,14 +146,14 @@ final class GitHubService {
 
     // MARK: - URL 解析
 
-    /// 从仓库 URL 中解析 owner 和 name
+    /// 从仓库 URL 中解析 owner 和 name（静态方法，无需实例）
     /// 支持 HTTPS 和 SSH 格式：
     /// - https://github.com/owner/repo.git
     /// - git@github.com:owner/repo.git
     /// - https://github.com/owner/repo
     /// - Parameter url: 仓库 URL 字符串
     /// - Returns: (owner, name) 元组，解析失败返回 nil
-    func parseRepoURL(_ url: String) -> (owner: String, name: String)? {
+    static func parseRepoURL(_ url: String) -> (owner: String, name: String)? {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 处理 SSH 格式：git@github.com:owner/repo.git
@@ -171,7 +181,7 @@ final class GitHubService {
     // MARK: - 私有辅助方法
 
     /// 去掉仓库名末尾的 .git 后缀
-    private func stripGitSuffix(_ name: String) -> String {
+    private static func stripGitSuffix(_ name: String) -> String {
         guard name.hasSuffix(".git") else { return name }
         return String(name.dropLast(4))
     }

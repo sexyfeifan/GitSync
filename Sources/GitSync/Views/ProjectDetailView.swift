@@ -258,7 +258,8 @@ struct ProjectDetailView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            let history = historyStore.history(forProject: project.id)
+            // 使用 SyncHistoryStore 的 entries(forProjectID:) 方法
+            let history = viewModel.historyStore.entries(forProjectID: project.id)
 
             if history.isEmpty {
                 Text("暂无同步记录")
@@ -280,7 +281,7 @@ struct ProjectDetailView: View {
 
                             Spacer()
 
-                            Text(entry.timestamp.formatted(.relative(presentation: .named)))
+                            Text(entry.performedAt.formatted(.relative(presentation: .named)))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -288,9 +289,5 @@ struct ProjectDetailView: View {
                 }
             }
         }
-    }
-
-    private var historyStore: SyncHistoryStore {
-        viewModel.historyStore
     }
 }

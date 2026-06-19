@@ -13,6 +13,9 @@ class ProjectStore: ObservableObject {
     /// 存储文件路径
     private let storageURL: URL
 
+    /// 同步引擎（用于实际同步操作）
+    private let syncEngine: SyncEngine
+
     /// 初始化存储管理器
     init() {
         // 在 Application Support 目录下创建存储文件
@@ -23,6 +26,7 @@ class ProjectStore: ObservableObject {
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
 
         self.storageURL = appDir.appendingPathComponent("projects.json")
+        self.syncEngine = SyncEngine()
 
         // 加载已有数据
         loadProjects()
@@ -159,16 +163,29 @@ class ProjectStore: ObservableObject {
 
     // MARK: - 同步操作
 
-    /// 同步单个项目（占位实现，实际同步逻辑由 GitSyncEngine 提供）
-    func syncProject(_ project: SyncProject) {
-        // 标记为同步中（这里简化处理）
-        updateSyncStatus(for: project.id, status: .notSynced, message: "正在同步...")
+    /// 同步单个项目（使用 SyncEngine 执行实际同步）
+    func syncProject(_ project: SyncProject) async {
+        // 标记为同步中
+        updateSyncStatus(for: project.id, status: .syncing, message: "同步中...")
+
+        let result = await syncEngine.syncProject(project)
+
+        switch result {
+        case .success(let message):
+            updateSyncStatus(for: project.id, status: .synced, message: message)
+        case .upToDate:
+            updateSyncStatus(for: project.id, status: .synced, message: "已是最新")
+        case .conflict(let details):
+            updateSyncStatus(for: project.id, status: .conflict, message: "冲突：\(details)")
+        case .error(let message):
+            updateSyncStatus(for: project.id, status: .error, message: message)
+        }
     }
 
     /// 同步所有项目
-    func syncAll() {
+    func syncAll() async {
         for project in projects {
-            syncProject(project)
+            await syncProject(project)
         }
     }
 }
