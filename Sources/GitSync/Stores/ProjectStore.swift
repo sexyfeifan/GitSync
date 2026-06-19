@@ -152,6 +152,7 @@ class ProjectStore: ObservableObject {
         if status == .synced {
             projects[index].lastSyncAt = Date()
         }
+        saveProjects()
     }
 
     /// 标记项目的首次备份已完成

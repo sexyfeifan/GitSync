@@ -155,11 +155,15 @@ enum GitHubServiceError: LocalizedError {
 @MainActor
 final class GitHubService {
     /// Token 版本号：每次 saveToken 时递增，实例检测到版本变化时清空用户缓存
-    /// 使用 OSAllocatedUnfairLock 保证线程安全
     private static let tokenVersionLock = OSAllocatedUnfairLock(initialState: UInt64(0))
     nonisolated(unsafe) static var tokenVersion: UInt64 {
         get { tokenVersionLock.withLock { $0 } }
         set { tokenVersionLock.withLock { $0 = newValue } }
+    }
+
+    /// 原子递增 tokenVersion
+    nonisolated private static func incrementTokenVersion() {
+        tokenVersionLock.withLock { $0 += 1 }
     }
 
     /// API 基础 URL
@@ -448,7 +452,7 @@ final class GitHubService {
     /// 保存 Token 到 Keychain
     @discardableResult
     nonisolated static func saveTokenToKeychain(_ token: String) -> Bool {
-        tokenVersion &+= 1
+        incrementTokenVersion()
         let data = token.data(using: .utf8) ?? Data()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -468,7 +472,7 @@ final class GitHubService {
 
     /// 从 Keychain 删除 Token
     nonisolated static func deleteTokenFromKeychain() {
-        tokenVersion &+= 1
+        incrementTokenVersion()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: AppConstants.keychainServiceName,

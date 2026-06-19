@@ -536,6 +536,8 @@ final class GitService: Sendable {
                 fm.createFile(atPath: stderrURL.path, contents: Data())
                 guard let stdoutHandle = try? FileHandle(forWritingTo: stdoutURL),
                       let stderrHandle = try? FileHandle(forWritingTo: stderrURL) else {
+                    try? fm.removeItem(at: stdoutURL)
+                    try? fm.removeItem(at: stderrURL)
                     continuation.resume(throwing: GitError.commandFailed(command: "git", code: -1, output: "无法创建临时文件"))
                     return
                 }
@@ -546,6 +548,10 @@ final class GitService: Sendable {
                 do {
                     try process.run()
                 } catch {
+                    try? stdoutHandle.close()
+                    try? stderrHandle.close()
+                    try? fm.removeItem(at: stdoutURL)
+                    try? fm.removeItem(at: stderrURL)
                     continuation.resume(throwing: GitError.commandFailed(command: "git", code: -1, output: error.localizedDescription))
                     return
                 }

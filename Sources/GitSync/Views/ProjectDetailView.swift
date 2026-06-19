@@ -1,10 +1,11 @@
 // ProjectDetailView.swift
-// 项目详情视图：展示 README、版本信息、本地/远程状态
+// 项目详情视图
 
 import SwiftUI
 
 struct ProjectDetailView: View {
     let info: ProjectDetailInfo
+    var onSync: ((SyncProject) -> Void)?
 
     var body: some View {
         ScrollView {
@@ -27,26 +28,32 @@ struct ProjectDetailView: View {
     // MARK: - 头部
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
                 Image(systemName: info.project.syncStatus.iconName)
                     .foregroundColor(info.project.syncStatus.color)
-                    .font(.title2)
-                Text(info.project.name)
-                    .font(.title.bold())
-                if let lang = info.githubRepo?.language {
-                    LanguageBadge(language: lang)
+                    .font(.title)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(info.project.name).font(.title.bold())
+                    if let desc = info.githubRepo?.description, !desc.isEmpty {
+                        Text(desc).font(.callout).foregroundColor(.secondary).lineLimit(2)
+                    }
                 }
+                Spacer()
+                Button {
+                    onSync?(info.project)
+                } label: {
+                    Label(String(localized: "同步"), systemImage: "arrow.clockwise")
+                }
+                .controlSize(.small)
+            }
+
+            HStack(spacing: 12) {
+                if let lang = info.githubRepo?.language { LanguageBadge(language: lang) }
                 if let license = info.githubRepo?.license {
                     Label(license.name, systemImage: "doc.plaintext")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.caption).foregroundColor(.secondary)
                 }
-            }
-            if let desc = info.githubRepo?.description, !desc.isEmpty {
-                Text(desc).font(.body).foregroundColor(.secondary)
-            }
-            HStack(spacing: 16) {
                 if let stars = info.githubRepo?.stargazersCount {
                     Label("\(stars)", systemImage: "star.fill").font(.caption).foregroundColor(.yellow)
                 }
@@ -54,6 +61,9 @@ struct ProjectDetailView: View {
                     Label("\(forks)", systemImage: "tuningfork").font(.caption).foregroundColor(.secondary)
                 }
                 Label(info.project.owner, systemImage: "person").font(.caption).foregroundColor(.secondary)
+                Link(destination: URL(string: info.project.remoteURL.replacingOccurrences(of: ".git", with: "").replacingOccurrences(of: "git@github.com:", with: "https://github.com/")) ?? URL(string: "https://github.com")!) {
+                    Label(String(localized: "GitHub"), systemImage: "safari").font(.caption)
+                }
             }
         }
     }
@@ -96,6 +106,15 @@ struct ProjectDetailView: View {
                 if repo.isFork, let parent = repo.parent {
                     InfoRow(label: String(localized: "Fork 自"), value: parent.fullName)
                 }
+                if let stars = repo.stargazersCount {
+                    InfoRow(label: String(localized: "Stars"), value: "\(stars)")
+                }
+                if let forks = repo.forksCount {
+                    InfoRow(label: String(localized: "Forks"), value: "\(forks)")
+                }
+                if let license = repo.license {
+                    InfoRow(label: String(localized: "许可证"), value: license.name)
+                }
             } else {
                 Text(String(localized: "无法获取远程信息")).font(.caption).foregroundColor(.secondary)
             }
@@ -134,6 +153,9 @@ struct ProjectDetailView: View {
                 Label(String(localized: "首次同步前将自动备份"), systemImage: "shield.checkered")
                     .font(.caption).foregroundColor(.orange)
             }
+            if let pushed = info.githubRepo?.pushedAt {
+                InfoRow(label: String(localized: "最后活动"), value: CachedDateFormatters.relativeString(from: pushed))
+            }
         }
     }
 
@@ -144,24 +166,16 @@ struct ProjectDetailView: View {
         if let readme = info.readme, !readme.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Label(String(localized: "README"), systemImage: "doc.text")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.secondary)
+                    .font(.caption.weight(.semibold)).foregroundColor(.secondary)
                 if let attributed = try? AttributedString(markdown: readme) {
-                    Text(attributed)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .cornerRadius(8)
+                    Text(attributed).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                        .background(Color(nsColor: .textBackgroundColor)).cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15)))
                 } else {
-                    Text(readme)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .cornerRadius(8)
+                    Text(readme).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                        .background(Color(nsColor: .textBackgroundColor)).cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15)))
                 }
             }
