@@ -167,17 +167,13 @@ struct ProjectDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label(String(localized: "README"), systemImage: "doc.text")
                     .font(.caption.weight(.semibold)).foregroundColor(.secondary)
-                if let attributed = try? AttributedString(markdown: readme) {
-                    Text(attributed).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                        .background(Color(nsColor: .textBackgroundColor)).cornerRadius(8)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15)))
-                } else {
-                    Text(readme).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                        .background(Color(nsColor: .textBackgroundColor)).cornerRadius(8)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15)))
-                }
+                Text(MarkdownRenderer.render(readme))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15)))
             }
         }
     }
