@@ -96,21 +96,21 @@ enum GitHubServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL(let url):
-            return "无效的 URL：\(url)"
+            return String(localized: "无效的 URL：\(url)")
         case .httpError(let statusCode, let body):
             // 截断过长的响应体，保留前 200 字符
             let truncated = body.count > 200 ? String(body.prefix(200)) + "..." : body
-            return "HTTP 请求失败（状态码 \(statusCode)）：\(truncated)"
+            return String(localized: "HTTP 请求失败（状态码 \(statusCode)）：\(truncated)")
         case .tokenSaveFailed(let status):
-            return "保存 GitHub Token 到 Keychain 失败（OSStatus: \(status)）"
+            return String(localized: "保存 GitHub Token 到 Keychain 失败（OSStatus: \(status)）")
         case .decodingFailed(let url, let underlying):
-            return "响应解析失败（\(url)）：\(underlying.localizedDescription)"
+            return String(localized: "响应解析失败（\(url)）：\(underlying.localizedDescription)")
         case .networkError(let url, let underlying):
-            return "网络请求失败（\(url)）：\(underlying.localizedDescription)"
+            return String(localized: "网络请求失败（\(url)）：\(underlying.localizedDescription)")
         case .unauthorized:
-            return "GitHub 认证失败（401）：请检查 Token 是否有效"
+            return String(localized: "GitHub 认证失败（401）：请检查 Token 是否有效")
         case .rateLimited(let resetDate):
-            return "GitHub API 速率限制已达上限，将在 \(Self.shortTimeFormatter.string(from: resetDate)) 后重置"
+            return String(localized: "GitHub API 速率限制已达上限，将在 \(Self.shortTimeFormatter.string(from: resetDate)) 后重置")
         }
     }
 }
@@ -122,6 +122,9 @@ enum GitHubServiceError: LocalizedError {
 /// 标记 @MainActor 保护缓存属性（cachedCurrentUser / hasCachedUser）的并发访问安全
 @MainActor
 final class GitHubService {
+    /// Token 版本号：每次 saveToken 时递增，实例检测到版本变化时清空用户缓存
+    nonisolated(unsafe) static var tokenVersion: UInt64 = 0
+
     /// API 基础 URL
     private let baseURL = AppConstants.gitHubAPIBaseURL
     /// GitHub Personal Access Token
@@ -132,6 +135,8 @@ final class GitHubService {
     private var cachedCurrentUser: String?
     /// 缓存是否已填充
     private var hasCachedUser: Bool = false
+    /// 记录创建缓存时的 token 版本号，用于检测 token 是否已更换
+    private var cachedTokenVersion: UInt64 = Self.tokenVersion
 
     /// 初始化 GitHub 服务
     /// - Parameters:
@@ -271,6 +276,12 @@ final class GitHubService {
 
     /// 获取当前登录用户的用户名（带实例级缓存）
     private func fetchCurrentUser() async -> String? {
+        // 检测 token 是否已更换，如果已更换则清空缓存
+        if Self.tokenVersion != cachedTokenVersion {
+            cachedCurrentUser = nil
+            hasCachedUser = false
+            cachedTokenVersion = Self.tokenVersion
+        }
         if hasCachedUser {
             return cachedCurrentUser
         }
@@ -356,8 +367,14 @@ final class GitHubService {
         }
         // 迁移：如果 UserDefaults 中有旧 token，迁移到 Keychain 后清除
         if let oldToken = UserDefaults.standard.string(forKey: AppConstants.gitHubTokenUserDefaultsKey), !oldToken.isEmpty {
-            try? saveToken(oldToken)
-            UserDefaults.standard.removeObject(forKey: AppConstants.gitHubTokenUserDefaultsKey)
+            // [BUGFIX-3] 先验证 Keychain 写入成功，再删除 UserDefaults 中的旧数据，防止 token 丢失
+            do {
+                try saveToken(oldToken)
+                UserDefaults.standard.removeObject(forKey: AppConstants.gitHubTokenUserDefaultsKey)
+            } catch {
+                // Keychain 写入失败，保留 UserDefaults 中的旧 token 作为兜底
+                return oldToken
+            }
             return oldToken
         }
         return nil
@@ -387,6 +404,8 @@ final class GitHubService {
     /// - Parameter token: 要保存的 token
     /// - Throws: 保存失败时抛出错误
     nonisolated static func saveToken(_ token: String) throws {
+        // 递增 token 版本号，通知所有实例清空用户缓存
+        tokenVersion &+= 1
         let data = token.data(using: .utf8) ?? Data()
 
         // 先尝试更新已有条目

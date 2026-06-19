@@ -26,7 +26,7 @@ protocol GitServiceProtocol {
     func currentBranch(at path: URL) async -> String?
 
     /// 检测是否有远端变更
-    func hasRemoteChanges(localPath: URL) async -> Bool
+    func hasRemoteChanges(localPath: URL, skipFetch: Bool) async -> Bool
 
     /// 检测是否有本地未提交或未推送的变更
     func hasLocalChanges(localPath: URL) async -> Bool

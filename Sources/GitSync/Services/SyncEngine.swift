@@ -64,7 +64,8 @@ final class SyncEngine {
         }
 
         // 步骤 2：检测远端是否有变更
-        let hasRemote = await gitService.hasRemoteChanges(localPath: localPath)
+        // [BUGFIX-2] 步骤 1 已经 fetch 过，这里传 skipFetch: true 避免冗余网络请求
+        let hasRemote = await gitService.hasRemoteChanges(localPath: localPath, skipFetch: true)
 
         // 步骤 3：检测本地是否有变更
         let hasLocal = await gitService.hasLocalChanges(localPath: localPath)
@@ -194,7 +195,15 @@ final class SyncEngine {
 
         case .failure:
             // rebase 失败，说明有冲突
-            let conflictFiles = syncStatus?.conflictFiles ?? []
+            // 重新获取最新状态（rebase 后冲突文件列表可能已变化）
+            let freshStatus: GitStatus?
+            switch await gitService.status(at: localPath) {
+            case .success(let s):
+                freshStatus = s
+            case .failure:
+                freshStatus = nil
+            }
+            let conflictFiles = freshStatus?.conflictFiles ?? syncStatus?.conflictFiles ?? []
             let details = conflictFiles.joined(separator: ", ")
             let msg = String(localized: "冲突文件: \(details)")
             await recordSync(project: project, action: .sync, result: .conflict,
@@ -242,6 +251,7 @@ final class SyncEngine {
     /// 日期格式化器（用于提交信息）
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX") // 固定 locale，避免用户自定义地区影响格式
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return f
     }()

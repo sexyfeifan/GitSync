@@ -15,8 +15,8 @@ class SyncHistoryStore: ObservableObject {
     /// 存储文件路径
     private let storageURL: URL
 
-    /// 最近一次已知的 entries 快照，用于 nonisolated deinit 中安全写入
-    nonisolated(unsafe) private var lastKnownEntries: [SyncHistoryEntry] = []
+    /// 使用 OSAllocatedUnfairLock 保护 lastKnownEntries 的读写，避免 data race
+    private let lockedEntries = OSAllocatedUnfairLock<[SyncHistoryEntry]>(initialState: [])
 
     /// 历史记录保留的最大数量（从 UserDefaults 读取，默认 1000）
     private var maxEntries: Int {
@@ -59,11 +59,12 @@ class SyncHistoryStore: ObservableObject {
     /// 使用 lastKnownEntries 快照避免访问 @MainActor 隔离的 entries
     nonisolated private func flushSync() {
         // 使用快照数据直接序列化写入，无需访问 @MainActor 隔离属性
+        let snapshot = lockedEntries.withLock { $0 }
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(lastKnownEntries)
+            let data = try encoder.encode(snapshot)
             try data.write(to: storageURL, options: .atomic)
         } catch {
             Log.storage.error("flushSync 写入失败: \(error.localizedDescription)")
@@ -76,7 +77,7 @@ class SyncHistoryStore: ObservableObject {
     func loadEntries() {
         guard FileManager.default.fileExists(atPath: storageURL.path) else {
             entries = []
-            lastKnownEntries = []
+            lockedEntries.withLock { $0 = [] }
             return
         }
         do {
@@ -84,11 +85,11 @@ class SyncHistoryStore: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             entries = try decoder.decode([SyncHistoryEntry].self, from: data)
-            lastKnownEntries = entries
+            lockedEntries.withLock { $0 = entries }
         } catch {
             Log.storage.error("加载同步历史失败: \(error.localizedDescription)")
             entries = []
-            lastKnownEntries = []
+            lockedEntries.withLock { $0 = [] }
         }
     }
 
@@ -113,7 +114,7 @@ class SyncHistoryStore: ObservableObject {
     /// 保存历史记录到磁盘（内部方法）
     private func saveEntries() {
         // 更新快照，供 deinit 中的 flushSync() 使用
-        lastKnownEntries = entries
+        lockedEntries.withLock { $0 = entries }
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601

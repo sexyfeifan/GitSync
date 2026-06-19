@@ -185,11 +185,14 @@ final class GitService: Sendable {
 
     /// 检测是否有远端变更（比较本地 HEAD 和远端 HEAD）
     /// - Parameter localPath: 本地仓库路径
+    /// - Parameter skipFetch: 为 true 时跳过 fetch（调用方已预先 fetch）
     /// - Returns: true 表示远端有新提交
-    func hasRemoteChanges(localPath: URL) async -> Bool {
-        // 先 fetch 最新引用
-        guard case .success = await fetch(at: localPath) else {
-            return false
+    func hasRemoteChanges(localPath: URL, skipFetch: Bool = false) async -> Bool {
+        // [BUGFIX-2] 如果调用方已预先 fetch，跳过重复的 fetch 请求
+        if !skipFetch {
+            guard case .success = await fetch(at: localPath) else {
+                return false
+            }
         }
 
         // 获取本地 HEAD 的 commit hash

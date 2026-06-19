@@ -59,6 +59,19 @@ class ProjectStore: ObservableObject {
             projects = try decoder.decode([SyncProject].self, from: data)
         } catch {
             Log.storage.error("加载项目数据失败: \(error.localizedDescription)")
+            // [BUGFIX-4] 解码失败时尝试从 .bak.1 备份恢复，避免丢失所有数据
+            let backupURL = storageURL.deletingPathExtension().appendingPathExtension("bak.1")
+            if FileManager.default.fileExists(atPath: backupURL.path),
+               let backupData = try? Data(contentsOf: backupURL) {
+                let backupDecoder = JSONDecoder()
+                backupDecoder.dateDecodingStrategy = .iso8601
+                if let backupProjects = try? backupDecoder.decode([SyncProject].self, from: backupData) {
+                    Log.storage.info("从备份 .bak.1 成功恢复 \(backupProjects.count) 个项目")
+                    projects = backupProjects
+                    return
+                }
+            }
+            Log.storage.error("备份恢复也失败，数据可能已丢失")
             projects = []
         }
     }
