@@ -1,30 +1,38 @@
-# 更新日志 (CHANGELOG)
+# Changelog
 
-所有显著更改都会记录在此文件中。
+## v0.1.1 (2026-06-19)
 
-格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
+### Bug Fixes
+- 修复 GitHub Token 键名不匹配导致 API 不工作
+- 修复 Token 明文存储改为 Keychain 安全存储
+- 修复 SF Symbol `arrow.branch` 不存在
+- 修复自动同步间隔单位不一致（分钟→秒）
+- 修复 `isOwnRepo` 语义错误（fork 仓库不再标记为自己的）
+- 修复 ProjectDetailView 主线程阻塞（git status 改为异步）
+- 修复 SyncEngine `@MainActor` 并发访问问题
+- 修复 AutoSyncService/NetworkMonitor 线程安全问题
+- 修复 GitService rename 操作解析错误
+- 修复 AddProjectSheet 失败时仍 dismiss 的问题
 
-## [0.1.0] - 2026-06-19
+### Improvements
+- 删除 4 个死代码文件（净减 736 行）
+- GitService 改为共享实例模式
+- GitHubService 错误处理改为 Result 类型
+- ProjectStore/SyncHistoryStore 添加 debounce 写入
+- 所有用户可见字符串改为 `String(localized:)`
+- 注入 AutoSyncService/NetworkMonitor/NotificationService
+- 状态栏图标支持 5 种动态状态（含无网络）
 
-### 新增
-- **菜单栏常驻**：macOS 13+ `MenuBarExtra` 菜单栏图标，一键访问所有项目
-- **项目管理**：添加、删除、搜索 Git 仓库项目
-- **自动同步**：可配置间隔（1/5/15/60 分钟）的定时自动同步
-- **智能同步策略**：
-  - 远端有更新时自动 `pull --rebase`
-  - 本地有变更时自动 `commit` + `push`
-  - 双方都有变更时 `commit` → `rebase` → `push`
-  - 冲突检测与报告
-- **GitHub 集成**：
-  - GitHub REST API 仓库信息查询
-  - 自动 Fork 非自有仓库
-  - URL 解析（支持 HTTPS 和 SSH 格式）
-  - Token 安全存储（Keychain）
-- **同步历史**：记录每次同步的操作类型、结果、耗时、commit hash
-- **状态检测**：实时检测本地/远端变更、冲突状态
-- **文件操作**：在 Finder/终端中打开、复制 GitHub URL
-- **设置面板**：同步目录配置、自动同步开关、GitHub Token 管理
-- **数据持久化**：项目配置和同步历史以 JSON 存储在 Application Support
-- **自动同步服务**：定时扫描所有项目并执行同步，支持暂停/恢复
-- **系统通知**：UNUserNotificationCenter 推送同步完成、冲突、错误通知
-- **网络监控**：NWPathMonitor 监听网络状态，断网自动暂停，恢复自动继续
+## v0.1.0 (2026-06-19)
+
+### Features
+- 菜单栏常驻图标，动态显示同步状态
+- 添加 GitHub 仓库 URL，自动克隆到本地
+- 非自己的仓库自动 Fork
+- 智能同步引擎：fetch → 检测变更 → pull/push/rebase
+- 冲突检测与自动 rebase
+- 自动定时同步（可暂停）
+- 网络状态监控
+- 系统通知（同步完成/有更新/冲突/错误）
+- 今日同步统计
+- 设置面板（同步目录/自动同步/GitHub Token）
